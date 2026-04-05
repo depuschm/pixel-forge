@@ -273,7 +273,8 @@ canvas.prev{display:block;max-width:100%;max-height:200px;image-rendering:pixela
       <div class="step-body open" id="body3">
         <div class="stats" id="noiseStats" style="display:none">
           <div class="stat"><div class="stat-v" id="cBefore">—</div><div class="stat-l">Colors Before</div></div>
-          <div class="stat"><div class="stat-v" id="cAfter">—</div><div class="stat-l">Colors After</div></div>
+          <div class="stat"><div class="stat-v" id="cAfter">—</div><div class="stat-l">After Noise</div></div>
+          <div class="stat"><div class="stat-v" id="cFinal">—</div><div class="stat-l">Final Colors</div></div>
           <div class="stat"><div class="stat-v" id="cReduce">—</div><div class="stat-l">Reduction</div></div>
         </div>
 
@@ -297,6 +298,21 @@ canvas.prev{display:block;max-width:100%;max-height:200px;image-rendering:pixela
             <span class="chk-box"></span>
             Affect previously changed pixels (allows multi-pass merging)
           </label>
+        </div>
+
+        <div style="border-top:1px solid var(--border);margin:12px 0 10px"></div>
+        <div class="srow">
+          <label class="chk-label">
+            <input type="checkbox" id="consolidate" checked>
+            <span class="chk-box"></span>
+            <span><strong>Palette Consolidation</strong> — k-means quantize to max distinct colors</span>
+          </label>
+        </div>
+        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Unlike noise removal (which merges pixels near a seed color), k-means guarantees the final N colors are as far apart from each other as possible across the full color space.</p>
+        <div class="srow" id="maxColorsRow">
+          <span class="slabel">Max Colors</span>
+          <input type="number" id="maxColors" min="2" max="256" value="32">
+          <span style="font-size:10px;color:var(--muted)">target palette size</span>
         </div>
 
         <div class="preview-wrap">
@@ -573,7 +589,6 @@ function removeNoise(id,threshold,neighbored,affectPrev){
     const group=[];
 
     if(neighbored){
-      // BFS: connected region of similar colors
       const vis=new Uint8Array(width*height);
       const q=[idx]; vis[idx]=1; let head=0;
       while(head<q.length){
@@ -589,7 +604,6 @@ function removeNoise(id,threshold,neighbored,affectPrev){
         for(const n of ns){ if(n>=0&&n<width*height&&!vis[n]){vis[n]=1;q.push(n);} }
       }
     } else {
-      // Global: all pixels within threshold of base color
       for(let j=0;j<width*height;j++){
         if(!affectPrev&&processed[j]) continue;
         const ji=j*4;
@@ -599,17 +613,96 @@ function removeNoise(id,threshold,neighbored,affectPrev){
     }
 
     if(group.length===0) continue;
-
-    // Mean color
     let sR=0,sG=0,sB=0;
     for(const j of group){ sR+=result[j*4]; sG+=result[j*4+1]; sB+=result[j*4+2]; }
     const n=group.length;
     const mR=Math.round(sR/n),mG=Math.round(sG/n),mB=Math.round(sB/n);
+    for(const j of group){ result[j*4]=mR; result[j*4+1]=mG; result[j*4+2]=mB; processed[j]=1; }
+  }
+  return new ImageData(result,width,height);
+}
 
-    for(const j of group){
-      result[j*4]=mR; result[j*4+1]=mG; result[j*4+2]=mB;
-      processed[j]=1;
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 3b — PALETTE CONSOLIDATION (k-means quantization)
+// Guarantees the final palette has maximally distinct colors.
+// Unlike noise removal (which groups by proximity to a seed), k-means
+// partitions the entire color space so every cluster center is as far
+// from every other center as possible given the pixel distribution.
+// ─────────────────────────────────────────────────────────────────────────────
+function consolidatePalette(id, maxColors){
+  const {data,width,height}=id;
+
+  // 1. Collect unique colors with pixel-weighted counts
+  const colorCounts=new Map();
+  for(let i=0;i<width*height;i++){
+    const di=i*4;
+    if(data[di+3]<10) continue;
+    const k=(data[di]<<16)|(data[di+1]<<8)|data[di+2];
+    colorCounts.set(k,(colorCounts.get(k)||0)+1);
+  }
+
+  if(colorCounts.size<=maxColors) return cloneID(id);
+
+  const colors=[...colorCounts.entries()].map(([k,count])=>({
+    r:(k>>16)&255, g:(k>>8)&255, b:k&255, count
+  }));
+
+  // 2. k-means++ initialisation — spread centroids by max distance from existing ones
+  colors.sort((a,b)=>b.count-a.count);
+  const centroids=[{r:colors[0].r, g:colors[0].g, b:colors[0].b}];
+  while(centroids.length<Math.min(maxColors,colors.length)){
+    let maxD=-1, best=null;
+    for(const c of colors){
+      const minD=Math.min(...centroids.map(cn=>colorDist(c.r,c.g,c.b,cn.r,cn.g,cn.b)));
+      if(minD>maxD){maxD=minD; best=c;}
     }
+    centroids.push({r:best.r, g:best.g, b:best.b});
+  }
+
+  // 3. k-means iterations (weighted by pixel count)
+  for(let iter=0;iter<30;iter++){
+    const sums=centroids.map(()=>({r:0,g:0,b:0,w:0}));
+    for(const c of colors){
+      let minD=Infinity,ci=0;
+      for(let i=0;i<centroids.length;i++){
+        const d=colorDist(c.r,c.g,c.b,centroids[i].r,centroids[i].g,centroids[i].b);
+        if(d<minD){minD=d;ci=i;}
+      }
+      sums[ci].r+=c.r*c.count; sums[ci].g+=c.g*c.count; sums[ci].b+=c.b*c.count; sums[ci].w+=c.count;
+    }
+    let changed=false;
+    for(let i=0;i<centroids.length;i++){
+      if(sums[i].w===0) continue;
+      const nr=Math.round(sums[i].r/sums[i].w);
+      const ng=Math.round(sums[i].g/sums[i].w);
+      const nb=Math.round(sums[i].b/sums[i].w);
+      if(nr!==centroids[i].r||ng!==centroids[i].g||nb!==centroids[i].b){
+        changed=true; centroids[i]={r:nr,g:ng,b:nb};
+      }
+    }
+    if(!changed) break;
+  }
+
+  // 4. Build lookup: original color key → nearest centroid
+  const lookup=new Map();
+  for(const [k] of colorCounts){
+    const r=(k>>16)&255, g=(k>>8)&255, b=k&255;
+    let minD=Infinity, best=centroids[0];
+    for(const c of centroids){
+      const d=colorDist(r,g,b,c.r,c.g,c.b);
+      if(d<minD){minD=d;best=c;}
+    }
+    lookup.set(k,best);
+  }
+
+  // 5. Remap all pixels
+  const result=new Uint8ClampedArray(data);
+  for(let i=0;i<width*height;i++){
+    const di=i*4;
+    if(data[di+3]<10) continue;
+    const k=(data[di]<<16)|(data[di+1]<<8)|data[di+2];
+    const c=lookup.get(k);
+    if(c){result[di]=c.r; result[di+1]=c.g; result[di+2]=c.b;}
   }
   return new ImageData(result,width,height);
 }
@@ -758,18 +851,29 @@ async function runPipeline(){
     const t=parseInt($('noiseT').value);
     const nbr=$('noiseNbr').checked;
     const ap=$('noiseAP').checked;
+    const doConsolidate=$('consolidate').checked;
+    const maxC=Math.max(2,parseInt($('maxColors').value)||32);
 
     const cBefore=countColors(inp);
     $('cBefore').textContent=cBefore;
     $('noiseStats').style.display='flex';
 
     await tick();
-    proc=removeNoise(inp,t,nbr,ap);
+    let noised=removeNoise(inp,t,nbr,ap);
+    const cAfter=countColors(noised);
+    $('cAfter').textContent=cAfter;
+
+    await tick();
+    if(doConsolidate && cAfter>maxC){
+      proc=consolidatePalette(noised,maxC);
+    } else {
+      proc=noised;
+    }
     S.denoised=proc;
 
-    const cAfter=countColors(proc);
-    $('cAfter').textContent=cAfter;
-    const reduction=cBefore>0?Math.round((1-cAfter/cBefore)*100):0;
+    const cFinal=countColors(proc);
+    $('cFinal').textContent=cFinal;
+    const reduction=cBefore>0?Math.round((1-cFinal/cBefore)*100):0;
     $('cReduce').textContent=reduction+'%';
 
     drawPrev($('prev3'),proc);
@@ -876,6 +980,10 @@ $('noiseT').addEventListener('input',function(){
 });
 ['noiseNbr','noiseAP'].forEach(id=>{
   $(id).addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+});
+$('consolidate').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+$('maxColors').addEventListener('change',()=>{
+  clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },400);
 });
 
 // Collapsible step bodies
