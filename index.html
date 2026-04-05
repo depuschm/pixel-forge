@@ -357,8 +357,9 @@ select.sel-styled option{background:var(--surface2)}
           <div class="canvas-bg"><canvas class="prev" id="prev3"></canvas></div>
         </div>
         <div id="paletteWrap" style="display:none;margin-top:10px">
-          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Resulting Color Palette</div>
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px" id="paletteLabel">Resulting Color Palette</div>
           <div class="palette" id="palette"></div>
+          <div id="paletteMsg" style="display:none;font-size:9px;color:var(--amber);margin-top:6px"></div>
         </div>
       </div>
     </div>
@@ -1163,12 +1164,20 @@ async function runPipeline(){
     drawPrev($('prev3'),proc);
 
     // palette
-    const pal=getPalette(proc,72);
+    const PAL_LIMIT=72;
+    const pal=getPalette(proc,PAL_LIMIT);
     const pw=$('palette'); pw.innerHTML='';
     for(const c of pal){
       const sw=document.createElement('div');
       sw.className='swatch'; sw.style.background=c; sw.title=c;
       pw.appendChild(sw);
+    }
+    const msg=$('paletteMsg');
+    if(cFinal>PAL_LIMIT){
+      msg.textContent=`Showing ${PAL_LIMIT} of ${cFinal} colors (most frequent first) — raise threshold or lower max colors to see the full palette`;
+      msg.style.display='block';
+    } else {
+      msg.style.display='none';
     }
     $('paletteWrap').style.display='block';
 
