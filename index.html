@@ -1105,16 +1105,13 @@ function drawGridOverlay(canvas,id,P,ox=0,oy=0){
   canvas.width=width; canvas.height=height;
   const ctx=canvas.getContext('2d');
   ctx.putImageData(id,0,0);
-  // Draw dark shadow first for contrast on light areas
-  ctx.strokeStyle='rgba(0,0,0,.4)';
-  ctx.lineWidth=2.5;
-  for(let x=ox%P;x<=width;x+=P){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();}
-  for(let y=oy%P;y<=height;y+=P){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();}
-  // Draw red line on top
-  ctx.strokeStyle='rgba(255,60,60,.85)';
-  ctx.lineWidth=1;
-  for(let x=ox%P;x<=width;x+=P){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();}
-  for(let y=oy%P;y<=height;y+=P){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();}
+  const startX=((ox%P)-P)|0;
+  const startY=((oy%P)-P)|0;
+  ctx.strokeStyle='rgba(255,60,60,.85)'; ctx.lineWidth=1;
+  ctx.beginPath();
+  for(let x=startX;x<=width;x+=P){ctx.moveTo(x|0,0);ctx.lineTo(x|0,height);}
+  for(let y=startY;y<=height;y+=P){ctx.moveTo(0,y|0);ctx.lineTo(width,y|0);}
+  ctx.stroke();
 }
 
 function drawZoomed(canvas,id,zoom){
