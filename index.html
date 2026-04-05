@@ -151,6 +151,14 @@ canvas.prev{display:block;max-width:100%;max-height:200px;image-rendering:pixela
 .info-text{font-size:10px;color:var(--muted);line-height:1.7;margin-bottom:12px}
 .info-text code{color:var(--blue);font-family:'Space Mono',monospace}
 
+/* Simple / Advanced mode */
+body.mode-simple .adv{display:none!important}
+
+.mode-toggle{display:flex;align-items:center;justify-content:center;gap:0;margin-top:14px}
+.mode-btn{font-family:'Press Start 2P',monospace;font-size:8px;padding:5px 14px;border:1px solid var(--border-hi);background:var(--surface2);color:var(--muted);cursor:pointer;letter-spacing:1px;transition:all .15s}
+.mode-btn:first-child{border-right:none}
+.mode-btn.active{background:var(--surface3);color:var(--text);border-color:var(--green)}
+
 /* Reorder buttons */
 .reorder-btns{display:flex;flex-direction:column;gap:2px;flex-shrink:0}
 .reorder-btn{background:none;border:1px solid var(--border);color:var(--muted);font-size:9px;width:18px;height:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color .12s,color .12s;padding:0;line-height:1}
@@ -168,13 +176,17 @@ select.sel-styled option{background:var(--surface2)}
 ::-webkit-scrollbar-thumb{background:var(--border-hi)}
 </style>
 </head>
-<body>
+<body class="mode-simple">
 <div class="wrap">
 
   <!-- HEADER -->
   <header>
     <div class="logo">PIXEL<em>FORGE</em></div>
     <div class="sub">Nano Banana Pro &rarr; Perfect Pixel Art Pipeline</div>
+    <div class="mode-toggle">
+      <button class="mode-btn active" id="modeSimple" onclick="setMode('simple')">SIMPLE</button>
+      <button class="mode-btn" id="modeAdv" onclick="setMode('advanced')">ADVANCED</button>
+    </div>
   </header>
 
   <!-- DROP ZONE -->
@@ -203,7 +215,7 @@ select.sel-styled option{background:var(--surface2)}
     <!-- ── STEP 1 ── SPRITE DETECTION -->
     <div class="step-card" id="card1">
       <div class="step-hdr" id="hdr1">
-        <div class="reorder-btns" onclick="event.stopPropagation()">
+        <div class="reorder-btns adv" onclick="event.stopPropagation()">
           <button class="reorder-btn" id="up1" onclick="moveStep('1','up')">▲</button>
           <button class="reorder-btn" id="dn1" onclick="moveStep('1','down')">▼</button>
         </div>
@@ -233,7 +245,7 @@ select.sel-styled option{background:var(--surface2)}
     <!-- ── STEP 2 ── PIXEL SIZE -->
     <div class="step-card" id="card2">
       <div class="step-hdr" id="hdr2">
-        <div class="reorder-btns" onclick="event.stopPropagation()">
+        <div class="reorder-btns adv" onclick="event.stopPropagation()">
           <button class="reorder-btn" id="up2" onclick="moveStep('2','up')">▲</button>
           <button class="reorder-btn" id="dn2" onclick="moveStep('2','down')">▼</button>
         </div>
@@ -252,14 +264,14 @@ select.sel-styled option{background:var(--surface2)}
             <div class="ps-info" id="psInfo">Auto-detected from run-length analysis</div>
           </div>
         </div>
-        <div class="srow">
+        <div class="srow adv">
           <label class="chk-label">
             <input type="checkbox" id="manualPS">
             <span class="chk-box"></span>
             Manual Override
           </label>
         </div>
-        <div class="srow" id="manualRow" style="display:none">
+        <div class="srow adv" id="manualRow" style="display:none">
           <span class="slabel">Pixel Size</span>
           <input type="number" id="psInput" min="1" max="128" value="8">
           <span style="font-size:10px;color:var(--muted)">px</span>
@@ -274,7 +286,7 @@ select.sel-styled option{background:var(--surface2)}
     <!-- ── STEP 3 ── NOISE REMOVAL -->
     <div class="step-card" id="card3">
       <div class="step-hdr" id="hdr3">
-        <div class="reorder-btns" onclick="event.stopPropagation()">
+        <div class="reorder-btns adv" onclick="event.stopPropagation()">
           <button class="reorder-btn" id="up3" onclick="moveStep('3','up')">▲</button>
           <button class="reorder-btn" id="dn3" onclick="moveStep('3','down')">▼</button>
         </div>
@@ -302,14 +314,14 @@ select.sel-styled option{background:var(--surface2)}
           <span class="val-disp" id="noiseTVal">30</span>
         </div>
         <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 120px">Color distance cutoff (0 = off, 100 = aggressive merge)</p>
-        <div class="srow">
+        <div class="srow adv">
           <label class="chk-label">
             <input type="checkbox" id="noiseNbr">
             <span class="chk-box"></span>
             Neighbored — only merge spatially connected pixels
           </label>
         </div>
-        <div class="srow">
+        <div class="srow adv">
           <label class="chk-label">
             <input type="checkbox" id="noiseAP">
             <span class="chk-box"></span>
@@ -324,8 +336,8 @@ select.sel-styled option{background:var(--surface2)}
             <strong>Palette Consolidation</strong>
           </label>
         </div>
-        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">After noise removal, quantize down to a target palette size. All algorithms operate on the post-noise color set (typically &lt;100 colors), so speed differences are negligible — choose by quality preference.</p>
-        <div class="srow" id="consolidateOptions">
+        <p class="adv" style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">After noise removal, quantize down to a target palette size. All algorithms operate on the post-noise color set (typically &lt;100 colors), so speed differences are negligible — choose by quality preference.</p>
+        <div class="srow adv" id="consolidateOptions">
           <span class="slabel">Algorithm</span>
           <select id="quantAlgo" class="sel-styled">
             <option value="kmeans" selected>k-means — best perceptual balance (default)</option>
@@ -334,7 +346,7 @@ select.sel-styled option{background:var(--surface2)}
             <option value="octree">Octree — fastest, good for quick iteration</option>
           </select>
         </div>
-        <div class="srow" id="quantOKLabRow">
+        <div class="srow adv" id="quantOKLabRow">
           <label class="chk-label" style="margin-left:120px">
             <input type="checkbox" id="quantOKLab" checked>
             <span class="chk-box"></span>
@@ -346,16 +358,16 @@ select.sel-styled option{background:var(--surface2)}
           <input type="number" id="maxColors" min="2" max="256" value="32">
           <span style="font-size:10px;color:var(--muted)">target palette size</span>
         </div>
-        <div style="border-top:1px solid var(--border);margin:12px 0 10px"></div>
-        <div class="srow">
+        <div style="border-top:1px solid var(--border);margin:12px 0 10px" class="adv"></div>
+        <div class="srow adv">
           <label class="chk-label">
             <input type="checkbox" id="togP">
             <span class="chk-box"></span>
             <strong>Perceptual Matching</strong>
           </label>
         </div>
-        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Independent of palette consolidation — remaps every pixel to its nearest palette color using perceptual distance instead of RGB. Fixes color assignment distortions that RGB nearest-neighbor introduces, especially in blues and purples.</p>
-        <div class="srow" id="perceptualRow">
+        <p class="adv" style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Independent of palette consolidation — remaps every pixel to its nearest palette color using perceptual distance instead of RGB. Fixes color assignment distortions that RGB nearest-neighbor introduces, especially in blues and purples.</p>
+        <div class="srow adv" id="perceptualRow">
           <span class="slabel">Color Space</span>
           <select id="perceptualMode" class="sel-styled">
             <option value="lab">CIE LAB — perceptually uniform, industry standard</option>
@@ -377,7 +389,7 @@ select.sel-styled option{background:var(--surface2)}
     <!-- ── STEP 4 ── SCALE DOWN -->
     <div class="step-card" id="card4">
       <div class="step-hdr" id="hdr4">
-        <div class="reorder-btns" onclick="event.stopPropagation()">
+        <div class="reorder-btns adv" onclick="event.stopPropagation()">
           <button class="reorder-btn" id="up4" onclick="moveStep('4','up')">▲</button>
           <button class="reorder-btn" id="dn4" onclick="moveStep('4','down')">▼</button>
         </div>
@@ -420,6 +432,12 @@ const S = {
 };
 
 let stepOrder = ['1','2','3','4'];
+
+function setMode(m){
+  document.body.classList.toggle('mode-simple', m==='simple');
+  $('modeSimple').classList.toggle('active', m==='simple');
+  $('modeAdv').classList.toggle('active', m==='advanced');
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UTILS
