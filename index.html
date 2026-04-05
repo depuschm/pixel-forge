@@ -593,52 +593,80 @@ function applySelection(){
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 2 — PIXEL SIZE DETECTION
+// Grid alignment scoring: for each candidate P and every possible grid offset,
+// measure the ratio of edge strength AT pixel boundaries vs WITHIN blocks.
+// The true P wins because pixel boundaries consistently have stronger color
+// transitions even in noisy images. Borders are excluded to avoid partial pixels.
 // ─────────────────────────────────────────────────────────────────────────────
 function detectPixelSize(id){
   const {data,width,height}=id;
-  const hist={};
-  const thresh=32;
+  const rowStep=Math.max(1,Math.floor(height/60));
+  const colStep=Math.max(1,Math.floor(width/60));
 
-  function addRun(len){ if(len>=2&&len<=128) hist[len]=(hist[len]||0)+1; }
-
-  // Sample rows
-  const rStep=Math.max(1,Math.floor(height/50));
-  for(let y=0;y<height;y+=rStep){
-    let rStart=0;
-    let pi=(y*width)*4;
-    let pr=data[pi],pg=data[pi+1],pb=data[pi+2],pa=data[pi+3];
-    for(let x=1;x<width;x++){
-      const i=(y*width+x)*4;
-      const r=data[i],g=data[i+1],b=data[i+2],a=data[i+3];
-      if(a<10||pa<10){ if(a>=10)rStart=x; pr=r;pg=g;pb=b;pa=a; continue; }
-      if(colorDist(r,g,b,pr,pg,pb)>thresh){ addRun(x-rStart); rStart=x; pr=r;pg=g;pb=b;pa=a; }
+  // Build averaged horizontal edge signal (color distance between horizontally adjacent pixels)
+  const hEdge=new Float32Array(width);
+  let rn=0;
+  for(let y=0;y<height;y+=rowStep){
+    let ok=false;
+    for(let x=0;x<width-1;x++){
+      const a=(y*width+x)*4;
+      if(data[a+3]<128||data[a+7]<128) continue;
+      ok=true;
+      const dr=data[a]-data[a+4],dg=data[a+1]-data[a+5],db=data[a+2]-data[a+6];
+      hEdge[x]+=Math.sqrt(dr*dr+dg*dg+db*db);
     }
+    if(ok) rn++;
   }
-  // Sample columns
-  const cStep=Math.max(1,Math.floor(width/50));
-  for(let x=0;x<width;x+=cStep){
-    let rStart=0;
-    let pi=x*4;
-    let pr=data[pi],pg=data[pi+1],pb=data[pi+2],pa=data[pi+3];
-    for(let y=1;y<height;y++){
-      const i=(y*width+x)*4;
-      const r=data[i],g=data[i+1],b=data[i+2],a=data[i+3];
-      if(a<10||pa<10){ if(a>=10)rStart=y; pr=r;pg=g;pb=b;pa=a; continue; }
-      if(colorDist(r,g,b,pr,pg,pb)>thresh){ addRun(y-rStart); rStart=y; pr=r;pg=g;pb=b;pa=a; }
+  if(rn>0) for(let x=0;x<width;x++) hEdge[x]/=rn;
+
+  // Build averaged vertical edge signal
+  const vEdge=new Float32Array(height);
+  let cn=0;
+  for(let x=0;x<width;x+=colStep){
+    let ok=false;
+    for(let y=0;y<height-1;y++){
+      const a=(y*width+x)*4,b=a+width*4;
+      if(data[a+3]<128||data[b+3]<128) continue;
+      ok=true;
+      const dr=data[a]-data[b],dg=data[a+1]-data[b+1],db=data[a+2]-data[b+2];
+      vEdge[y]+=Math.sqrt(dr*dr+dg*dg+db*db);
     }
+    if(ok) cn++;
+  }
+  if(cn>0) for(let y=0;y<height;y++) vEdge[y]/=cn;
+
+  // For each candidate P: try all grid offsets, score as boundary/interior edge ratio
+  // Skip first and last P positions to avoid partial pixels at borders
+  function scoreEdge(edge,len){
+    const maxP=Math.min(64,Math.floor(len/4));
+    const scores=new Float32Array(maxP+1);
+    for(let P=2;P<=maxP;P++){
+      let best=0;
+      for(let off=0;off<P;off++){
+        let bs=0,bc=0,is=0,ic=0;
+        for(let i=P;i<len-P;i++){
+          if((i-off)%P===0){ bs+=edge[i]; bc++; }
+          else{ is+=edge[i]; ic++; }
+        }
+        if(!bc||!ic) continue;
+        const s=(bs/bc)/(is/ic+1e-6);
+        if(s>best) best=s;
+      }
+      scores[P]=best;
+    }
+    return scores;
   }
 
-  if(Object.keys(hist).length===0) return 4;
+  const hs=scoreEdge(hEdge,width);
+  const vs=scoreEdge(vEdge,height);
+  const maxP=Math.min(hs.length,vs.length)-1;
 
-  const sorted=Object.entries(hist).sort((a,b)=>b[1]-a[1]).slice(0,16).map(([k])=>parseInt(k));
-  let g=sorted[0];
-  for(let i=1;i<Math.min(sorted.length,10);i++){
-    const ng=gcd(g,sorted[i]);
-    if(ng>=2) g=ng; else break;
+  let bestP=2,bestS=-1;
+  for(let P=2;P<=maxP;P++){
+    const s=hs[P]+vs[P];
+    if(s>bestS){bestS=s;bestP=P;}
   }
-
-  const common=[1,2,3,4,5,6,7,8,10,12,14,16,18,20,24,28,32,40,48,64];
-  return common.reduce((p,c)=>Math.abs(c-g)<Math.abs(p-g)?c:p);
+  return bestP;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
