@@ -156,8 +156,8 @@ body.mode-simple .adv{display:none!important}
 
 .mode-toggle{display:flex;align-items:center;justify-content:center;gap:0;margin-top:14px}
 .mode-btn{font-family:'Press Start 2P',monospace;font-size:8px;padding:5px 14px;border:1px solid var(--border-hi);background:var(--surface2);color:var(--muted);cursor:pointer;letter-spacing:1px;transition:all .15s}
-.mode-btn:first-child{border-right:none}
-.mode-btn.active{background:var(--surface3);color:var(--text);border-color:var(--green)}
+.mode-btn:last-child{margin-left:-1px}
+.mode-btn.active{background:var(--surface3);color:var(--text);border-color:var(--green);position:relative;z-index:1}
 
 /* Reorder buttons */
 .reorder-btns{display:flex;flex-direction:column;gap:2px;flex-shrink:0}
