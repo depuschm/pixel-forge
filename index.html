@@ -323,6 +323,13 @@ select.sel-styled option{background:var(--surface2)}
             <option value="octree">Octree — fastest, good for quick iteration</option>
           </select>
         </div>
+        <div class="srow" id="quantOKLabRow">
+          <label class="chk-label" style="margin-left:120px">
+            <input type="checkbox" id="quantOKLab" checked>
+            <span class="chk-box"></span>
+            Quantize in OKLab space — distances &amp; cluster centers computed perceptually
+          </label>
+        </div>
         <div class="srow" id="maxColorsRow">
           <span class="slabel">Max Colors</span>
           <input type="number" id="maxColors" min="2" max="256" value="32">
@@ -684,6 +691,40 @@ function rgbToOklab(r,g,b){
   ];
 }
 
+function oklabToRgb(L,a,b){
+  // OKLab → LMS' (inverse M2)
+  const l_=L+0.3963377774*a+0.2158037573*b;
+  const m_=L-0.1055613458*a-0.0638541728*b;
+  const s_=L-0.0894841775*a-1.2914855480*b;
+  // LMS' → LMS
+  const l=l_**3, m=m_**3, s=s_**3;
+  // LMS → linear RGB (inverse M1)
+  const r= 4.0767416621*l-3.3077115913*m+0.2309699292*s;
+  const g=-1.2684380046*l+2.6097574011*m-0.3413193965*s;
+  const bv=-0.0041960863*l-0.7034186147*m+1.7076147010*s;
+  const toSRGB=c=>{
+    c=Math.max(0,Math.min(1,c));
+    return Math.round((c<=0.0031308?c*12.92:(1.055*c**(1/2.4)-0.055))*255);
+  };
+  return [toSRGB(r),toSRGB(g),toSRGB(bv)];
+}
+
+// Scale OKLab (L∈[0,1], a/b∈[-0.5,0.5]) into [0,255] so existing
+// algorithm code (which uses r/g/b fields) works unchanged in OKLab space.
+function colorsToOKLab(colors){
+  return colors.map(c=>{
+    const [L,a,b]=rgbToOklab(c.r,c.g,c.b);
+    return {r:L*255, g:(a+0.5)*255, b:(b+0.5)*255, count:c.count};
+  });
+}
+
+function oklabCentroidsToRGB(centroids){
+  return centroids.map(c=>{
+    const [r,g,b]=oklabToRgb(c.r/255, c.g/255-0.5, c.b/255-0.5);
+    return {r,g,b};
+  });
+}
+
 function labDist(L1,a1,b1,L2,a2,b2){
   return (L1-L2)**2+(a1-a2)**2+(b1-b2)**2; // squared — no sqrt needed for comparisons
 }
@@ -906,20 +947,23 @@ function quantizeOctree(colors, k){
 // ─────────────────────────────────────────────────────────────────────────────
 // QUANTIZE DISPATCHER
 // ─────────────────────────────────────────────────────────────────────────────
-function quantize(id, maxColors, algo, perceptualMode){
+function quantize(id, maxColors, algo, useOKLab, perceptualMode){
   const colorMap=getColorMap(id);
   const needsQuant=colorMap.size>maxColors;
   const usePerceptual=perceptualMode!=='off';
 
   let palette;
   if(needsQuant){
-    const colors=[...colorMap.values()];
+    let colors=[...colorMap.values()];
+    if(useOKLab) colors=colorsToOKLab(colors);
+    let raw;
     switch(algo){
-      case 'wu':        palette=quantizeWu(colors,maxColors);        break;
-      case 'mediancut': palette=quantizeMedianCut(colors,maxColors);  break;
-      case 'octree':    palette=quantizeOctree(colors,maxColors);     break;
-      default:          palette=quantizeKMeans(colors,maxColors);
+      case 'wu':        raw=quantizeWu(colors,maxColors);        break;
+      case 'mediancut': raw=quantizeMedianCut(colors,maxColors);  break;
+      case 'octree':    raw=quantizeOctree(colors,maxColors);     break;
+      default:          raw=quantizeKMeans(colors,maxColors);
     }
+    palette=useOKLab?oklabCentroidsToRGB(raw):raw;
   } else {
     palette=[...colorMap.values()];
   }
@@ -1079,6 +1123,7 @@ async function runPipeline(){
     const doConsolidate=$('consolidate').checked;
     const maxC=Math.max(2,parseInt($('maxColors').value)||32);
     const algo=$('quantAlgo').value;
+    const useOKLab=$('quantOKLab').checked;
     const doPerceptual=$('togP').checked;
     const perceptualMode=$('perceptualMode').value;
 
@@ -1093,7 +1138,7 @@ async function runPipeline(){
 
     await tick();
     if(doConsolidate&&cAfter>maxC){
-      proc=quantize(noised,maxC,algo,'off');
+      proc=quantize(noised,maxC,algo,useOKLab,'off');
     } else {
       proc=noised;
     }
@@ -1217,7 +1262,7 @@ $('noiseT').addEventListener('input',function(){
   $('noiseTVal').textContent=this.value;
   clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },700);
 });
-['noiseNbr','noiseAP','consolidate','togP'].forEach(id=>{
+['noiseNbr','noiseAP','consolidate','togP','quantOKLab'].forEach(id=>{
   $(id).addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 });
 $('quantAlgo').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
@@ -1233,7 +1278,7 @@ $('togP').addEventListener('change',function(){
 // Dim consolidate sub-options when toggle is off
 $('consolidate').addEventListener('change',function(){
   const on=this.checked;
-  ['consolidateOptions','maxColorsRow'].forEach(id=>{
+  ['consolidateOptions','quantOKLabRow','maxColorsRow'].forEach(id=>{
     $(id).style.opacity=on?'1':'.35';
     $(id).style.pointerEvents=on?'auto':'none';
   });
