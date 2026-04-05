@@ -151,6 +151,11 @@ canvas.prev{display:block;max-width:100%;max-height:200px;image-rendering:pixela
 .info-text{font-size:10px;color:var(--muted);line-height:1.7;margin-bottom:12px}
 .info-text code{color:var(--blue);font-family:'Space Mono',monospace}
 
+/* Select */
+select.sel-styled{background:var(--surface2);border:1px solid var(--border-hi);color:var(--text);font-family:'Space Mono',monospace;font-size:10px;padding:5px 8px;outline:none;cursor:pointer;flex:1;min-width:0}
+select.sel-styled:focus{border-color:var(--green)}
+select.sel-styled option{background:var(--surface2)}
+
 /* Scrollbar */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:var(--surface)}
@@ -305,15 +310,33 @@ canvas.prev{display:block;max-width:100%;max-height:200px;image-rendering:pixela
           <label class="chk-label">
             <input type="checkbox" id="consolidate" checked>
             <span class="chk-box"></span>
-            <span><strong>Palette Consolidation</strong> — k-means quantize to max distinct colors</span>
+            <strong>Palette Consolidation</strong>
           </label>
         </div>
-        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Unlike noise removal (which merges pixels near a seed color), k-means guarantees the final N colors are as far apart from each other as possible across the full color space.</p>
+        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">After noise removal, quantize down to a target palette size. All algorithms operate on the post-noise color set (typically &lt;100 colors), so speed differences are negligible — choose by quality preference.</p>
+        <div class="srow" id="consolidateOptions">
+          <span class="slabel">Algorithm</span>
+          <select id="quantAlgo" class="sel-styled">
+            <option value="kmeans" selected>k-means — best perceptual balance (default)</option>
+            <option value="wu">Wu's — highest quality, minimizes within-cluster variance</option>
+            <option value="mediancut">Median Cut — classic, biased toward dominant colors</option>
+            <option value="octree">Octree — fastest, good for quick iteration</option>
+          </select>
+        </div>
         <div class="srow" id="maxColorsRow">
           <span class="slabel">Max Colors</span>
           <input type="number" id="maxColors" min="2" max="256" value="32">
           <span style="font-size:10px;color:var(--muted)">target palette size</span>
         </div>
+        <div style="border-top:1px solid var(--border);margin:10px 0 10px"></div>
+        <div class="srow">
+          <label class="chk-label">
+            <input type="checkbox" id="labPerceptual">
+            <span class="chk-box"></span>
+            <span><strong>Perceptual Matching (LAB)</strong> — remap pixels to palette using LAB distance instead of RGB</span>
+          </label>
+        </div>
+        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Runs after any algorithm as a final remap pass. LAB distance matches human perception — equal numeric distances in RGB look very unequal to the eye (blues appear to shift more than greens). Improves color accuracy especially for subtle hues.</p>
 
         <div class="preview-wrap">
           <div class="prev-label">Preview — After Noise Removal</div>
@@ -623,43 +646,96 @@ function removeNoise(id,threshold,neighbored,affectPrev){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STEP 3b — PALETTE CONSOLIDATION (k-means quantization)
-// Guarantees the final palette has maximally distinct colors.
-// Unlike noise removal (which groups by proximity to a seed), k-means
-// partitions the entire color space so every cluster center is as far
-// from every other center as possible given the pixel distribution.
+// COLOR SPACE — sRGB ↔ LAB
 // ─────────────────────────────────────────────────────────────────────────────
-function consolidatePalette(id, maxColors){
-  const {data,width,height}=id;
+function srgbToLinear(c){ c/=255; return c<=.04045?c/12.92:((c+.055)/1.055)**2.4; }
 
-  // 1. Collect unique colors with pixel-weighted counts
-  const colorCounts=new Map();
+function rgbToLab(r,g,b){
+  const lr=srgbToLinear(r),lg=srgbToLinear(g),lb=srgbToLinear(b);
+  let x=(lr*.4124564+lg*.3575761+lb*.1804375)/.95047;
+  let y=(lr*.2126729+lg*.7151522+lb*.0721750)/1.00000;
+  let z=(lr*.0193339+lg*.1191920+lb*.9503041)/1.08883;
+  const f=t=>t>.008856?t**(1/3):7.787*t+16/116;
+  x=f(x); y=f(y); z=f(z);
+  return [116*y-16, 500*(x-y), 200*(y-z)];
+}
+
+function labDist(L1,a1,b1,L2,a2,b2){
+  return (L1-L2)**2+(a1-a2)**2+(b1-b2)**2; // squared — no sqrt needed for comparisons
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARED QUANTIZATION HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function getColorMap(id){
+  const {data,width,height}=id;
+  const m=new Map();
   for(let i=0;i<width*height;i++){
     const di=i*4;
     if(data[di+3]<10) continue;
-    const k=(data[di]<<16)|(data[di+1]<<8)|data[di+2];
-    colorCounts.set(k,(colorCounts.get(k)||0)+1);
+    const r=data[di],g=data[di+1],b=data[di+2];
+    const k=(r<<16)|(g<<8)|b;
+    const e=m.get(k);
+    if(e) e.count++; else m.set(k,{r,g,b,count:1});
   }
+  return m;
+}
 
-  if(colorCounts.size<=maxColors) return cloneID(id);
+function buildRGBLookup(colorMap, palette){
+  const lookup=new Map();
+  for(const [k,c] of colorMap){
+    let minD=Infinity,best=palette[0];
+    for(const p of palette){
+      const d=colorDist(c.r,c.g,c.b,p.r,p.g,p.b);
+      if(d<minD){minD=d;best=p;}
+    }
+    lookup.set(k,best);
+  }
+  return lookup;
+}
 
-  const colors=[...colorCounts.entries()].map(([k,count])=>({
-    r:(k>>16)&255, g:(k>>8)&255, b:k&255, count
-  }));
+function buildLABLookup(colorMap, palette){
+  const palLab=palette.map(p=>({...p,lab:rgbToLab(p.r,p.g,p.b)}));
+  const lookup=new Map();
+  for(const [k,c] of colorMap){
+    const [L,a,b]=rgbToLab(c.r,c.g,c.b);
+    let minD=Infinity,best=palLab[0];
+    for(const p of palLab){
+      const d=labDist(L,a,b,...p.lab);
+      if(d<minD){minD=d;best=p;}
+    }
+    lookup.set(k,best);
+  }
+  return lookup;
+}
 
-  // 2. k-means++ initialisation — spread centroids by max distance from existing ones
+function remapPixels(id, lookup){
+  const result=new Uint8ClampedArray(id.data);
+  for(let i=0;i<id.width*id.height;i++){
+    const di=i*4;
+    if(id.data[di+3]<10) continue;
+    const k=(id.data[di]<<16)|(id.data[di+1]<<8)|id.data[di+2];
+    const c=lookup.get(k);
+    if(c){result[di]=c.r;result[di+1]=c.g;result[di+2]=c.b;}
+  }
+  return new ImageData(result,id.width,id.height);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALGORITHM 1 — k-means (default)
+// Best perceptual balance. k-means++ init guarantees spread. 30-iter convergence.
+// ─────────────────────────────────────────────────────────────────────────────
+function quantizeKMeans(colors, k){
   colors.sort((a,b)=>b.count-a.count);
-  const centroids=[{r:colors[0].r, g:colors[0].g, b:colors[0].b}];
-  while(centroids.length<Math.min(maxColors,colors.length)){
-    let maxD=-1, best=null;
+  const centroids=[{r:colors[0].r,g:colors[0].g,b:colors[0].b}];
+  while(centroids.length<Math.min(k,colors.length)){
+    let maxD=-1,best=null;
     for(const c of colors){
       const minD=Math.min(...centroids.map(cn=>colorDist(c.r,c.g,c.b,cn.r,cn.g,cn.b)));
-      if(minD>maxD){maxD=minD; best=c;}
+      if(minD>maxD){maxD=minD;best=c;}
     }
-    centroids.push({r:best.r, g:best.g, b:best.b});
+    centroids.push({r:best.r,g:best.g,b:best.b});
   }
-
-  // 3. k-means iterations (weighted by pixel count)
   for(let iter=0;iter<30;iter++){
     const sums=centroids.map(()=>({r:0,g:0,b:0,w:0}));
     for(const c of colors){
@@ -668,43 +744,149 @@ function consolidatePalette(id, maxColors){
         const d=colorDist(c.r,c.g,c.b,centroids[i].r,centroids[i].g,centroids[i].b);
         if(d<minD){minD=d;ci=i;}
       }
-      sums[ci].r+=c.r*c.count; sums[ci].g+=c.g*c.count; sums[ci].b+=c.b*c.count; sums[ci].w+=c.count;
+      sums[ci].r+=c.r*c.count;sums[ci].g+=c.g*c.count;sums[ci].b+=c.b*c.count;sums[ci].w+=c.count;
     }
     let changed=false;
     for(let i=0;i<centroids.length;i++){
-      if(sums[i].w===0) continue;
-      const nr=Math.round(sums[i].r/sums[i].w);
-      const ng=Math.round(sums[i].g/sums[i].w);
-      const nb=Math.round(sums[i].b/sums[i].w);
-      if(nr!==centroids[i].r||ng!==centroids[i].g||nb!==centroids[i].b){
-        changed=true; centroids[i]={r:nr,g:ng,b:nb};
-      }
+      if(!sums[i].w) continue;
+      const nr=Math.round(sums[i].r/sums[i].w),ng=Math.round(sums[i].g/sums[i].w),nb=Math.round(sums[i].b/sums[i].w);
+      if(nr!==centroids[i].r||ng!==centroids[i].g||nb!==centroids[i].b){changed=true;centroids[i]={r:nr,g:ng,b:nb};}
     }
     if(!changed) break;
   }
+  return centroids;
+}
 
-  // 4. Build lookup: original color key → nearest centroid
-  const lookup=new Map();
-  for(const [k] of colorCounts){
-    const r=(k>>16)&255, g=(k>>8)&255, b=k&255;
-    let minD=Infinity, best=centroids[0];
-    for(const c of centroids){
-      const d=colorDist(r,g,b,c.r,c.g,c.b);
-      if(d<minD){minD=d;best=c;}
+// ─────────────────────────────────────────────────────────────────────────────
+// ALGORITHM 2 — Wu's (highest quality)
+// Variance-minimizing splits: always splits the box with the highest weighted
+// variance along the axis that most reduces total variance. Closest to
+// what Photoshop's "Save for Web" uses.
+// ─────────────────────────────────────────────────────────────────────────────
+function quantizeWu(colors, k){
+  function boxVariance(box){
+    if(box.length===0) return 0;
+    let w=0,sR=0,sG=0,sB=0,sR2=0,sG2=0,sB2=0;
+    for(const c of box){
+      w+=c.count;
+      sR+=c.r*c.count;sG+=c.g*c.count;sB+=c.b*c.count;
+      sR2+=c.r**2*c.count;sG2+=c.g**2*c.count;sB2+=c.b**2*c.count;
     }
-    lookup.set(k,best);
+    return ((sR2/w-(sR/w)**2)+(sG2/w-(sG/w)**2)+(sB2/w-(sB/w)**2))*w;
+  }
+  function bestSplit(box){
+    let bestScore=Infinity,bestA=null,bestB=null;
+    for(const axis of ['r','g','b']){
+      const sorted=[...box].sort((a,b2)=>a[axis]-b2[axis]);
+      for(let i=1;i<sorted.length;i++){
+        const a=sorted.slice(0,i),b2=sorted.slice(i);
+        const v=boxVariance(a)+boxVariance(b2);
+        if(v<bestScore){bestScore=v;bestA=a;bestB=b2;}
+      }
+    }
+    return [bestA,bestB];
+  }
+  let boxes=[colors];
+  while(boxes.length<k){
+    let maxV=-1,idx=0;
+    for(let i=0;i<boxes.length;i++){
+      if(boxes[i].length<=1) continue;
+      const v=boxVariance(boxes[i]);
+      if(v>maxV){maxV=v;idx=i;}
+    }
+    if(maxV<=0) break;
+    const [a,b]=bestSplit(boxes[idx]);
+    if(!a||!b) break;
+    boxes.splice(idx,1,a,b);
+  }
+  return boxes.map(box=>{
+    let sR=0,sG=0,sB=0,w=0;
+    for(const c of box){sR+=c.r*c.count;sG+=c.g*c.count;sB+=c.b*c.count;w+=c.count;}
+    return {r:Math.round(sR/w),g:Math.round(sG/w),b:Math.round(sB/w)};
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALGORITHM 3 — Median Cut (classic)
+// Splits by the median of the longest color channel axis. Biased toward
+// dominant colors — small accent colors can get under-represented.
+// ─────────────────────────────────────────────────────────────────────────────
+function quantizeMedianCut(colors, k){
+  function splitBox(box){
+    let minR=255,maxR=0,minG=255,maxG=0,minB=255,maxB=0;
+    for(const c of box){
+      minR=Math.min(minR,c.r);maxR=Math.max(maxR,c.r);
+      minG=Math.min(minG,c.g);maxG=Math.max(maxG,c.g);
+      minB=Math.min(minB,c.b);maxB=Math.max(maxB,c.b);
+    }
+    const axis=(maxR-minR)>=(maxG-minG)&&(maxR-minR)>=(maxB-minB)?'r':(maxG-minG)>=(maxB-minB)?'g':'b';
+    const sorted=[...box].sort((a,b2)=>a[axis]-b2[axis]);
+    const mid=Math.floor(sorted.length/2);
+    return [sorted.slice(0,mid),sorted.slice(mid)];
+  }
+  let boxes=[colors];
+  while(boxes.length<k&&boxes.some(b=>b.length>1)){
+    let idx=0,maxLen=0;
+    for(let i=0;i<boxes.length;i++){if(boxes[i].length>maxLen){maxLen=boxes[i].length;idx=i;}}
+    if(maxLen<=1) break;
+    const [a,b]=splitBox(boxes[idx]);
+    boxes.splice(idx,1,a,b);
+  }
+  return boxes.map(box=>{
+    let sR=0,sG=0,sB=0,w=0;
+    for(const c of box){sR+=c.r*c.count;sG+=c.g*c.count;sB+=c.b*c.count;w+=c.count;}
+    return {r:Math.round(sR/w),g:Math.round(sG/w),b:Math.round(sB/w)};
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALGORITHM 4 — Octree (fastest)
+// Greedily merges the closest color pair at each step — mimics octree node
+// reduction. O(n²) but n is tiny post-noise so it's instant.
+// ─────────────────────────────────────────────────────────────────────────────
+function quantizeOctree(colors, k){
+  const pool=colors.map(c=>({...c}));
+  while(pool.length>k){
+    let minD=Infinity,ai=0,bi=1;
+    for(let i=0;i<pool.length;i++){
+      for(let j=i+1;j<pool.length;j++){
+        const d=colorDist(pool[i].r,pool[i].g,pool[i].b,pool[j].r,pool[j].g,pool[j].b);
+        if(d<minD){minD=d;ai=i;bi=j;}
+      }
+    }
+    const a=pool[ai],b=pool[bi],w=a.count+b.count;
+    a.r=Math.round((a.r*a.count+b.r*b.count)/w);
+    a.g=Math.round((a.g*a.count+b.g*b.count)/w);
+    a.b=Math.round((a.b*a.count+b.b*b.count)/w);
+    a.count=w;
+    pool.splice(bi,1);
+  }
+  return pool;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QUANTIZE DISPATCHER
+// ─────────────────────────────────────────────────────────────────────────────
+function quantize(id, maxColors, algo, useLab){
+  const colorMap=getColorMap(id);
+  const needsQuant=colorMap.size>maxColors;
+
+  let palette;
+  if(needsQuant){
+    const colors=[...colorMap.values()];
+    switch(algo){
+      case 'wu':        palette=quantizeWu(colors,maxColors);        break;
+      case 'mediancut': palette=quantizeMedianCut(colors,maxColors);  break;
+      case 'octree':    palette=quantizeOctree(colors,maxColors);     break;
+      default:          palette=quantizeKMeans(colors,maxColors);
+    }
+  } else {
+    palette=[...colorMap.values()];
   }
 
-  // 5. Remap all pixels
-  const result=new Uint8ClampedArray(data);
-  for(let i=0;i<width*height;i++){
-    const di=i*4;
-    if(data[di+3]<10) continue;
-    const k=(data[di]<<16)|(data[di+1]<<8)|data[di+2];
-    const c=lookup.get(k);
-    if(c){result[di]=c.r; result[di+1]=c.g; result[di+2]=c.b;}
-  }
-  return new ImageData(result,width,height);
+  if(!needsQuant&&!useLab) return cloneID(id);
+  const lookup=useLab?buildLABLookup(colorMap,palette):buildRGBLookup(colorMap,palette);
+  return remapPixels(id,lookup);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -853,6 +1035,8 @@ async function runPipeline(){
     const ap=$('noiseAP').checked;
     const doConsolidate=$('consolidate').checked;
     const maxC=Math.max(2,parseInt($('maxColors').value)||32);
+    const algo=$('quantAlgo').value;
+    const useLab=$('labPerceptual').checked;
 
     const cBefore=countColors(inp);
     $('cBefore').textContent=cBefore;
@@ -864,8 +1048,8 @@ async function runPipeline(){
     $('cAfter').textContent=cAfter;
 
     await tick();
-    if(doConsolidate && cAfter>maxC){
-      proc=consolidatePalette(noised,maxC);
+    if(doConsolidate&&(cAfter>maxC||useLab)){
+      proc=quantize(noised,maxC,algo,useLab);
     } else {
       proc=noised;
     }
@@ -978,8 +1162,19 @@ $('noiseT').addEventListener('input',function(){
   $('noiseTVal').textContent=this.value;
   clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },700);
 });
-['noiseNbr','noiseAP'].forEach(id=>{
+['noiseNbr','noiseAP','consolidate','labPerceptual'].forEach(id=>{
   $(id).addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+});
+$('quantAlgo').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+$('maxColors').addEventListener('change',()=>{ clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },400); });
+
+// Show/hide consolidate sub-options
+$('consolidate').addEventListener('change',function(){
+  const on=this.checked;
+  $('consolidateOptions').style.opacity=on?'1':'.35';
+  $('consolidateOptions').style.pointerEvents=on?'auto':'none';
+  $('maxColorsRow').style.opacity=on?'1':'.35';
+  $('maxColorsRow').style.pointerEvents=on?'auto':'none';
 });
 $('consolidate').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 $('maxColors').addEventListener('change',()=>{
