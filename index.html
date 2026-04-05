@@ -328,16 +328,22 @@ select.sel-styled option{background:var(--surface2)}
           <input type="number" id="maxColors" min="2" max="256" value="32">
           <span style="font-size:10px;color:var(--muted)">target palette size</span>
         </div>
-        <div style="border-top:1px solid var(--border);margin:10px 0 10px"></div>
+        <div style="border-top:1px solid var(--border);margin:12px 0 10px"></div>
         <div class="srow">
-          <span class="slabel">Perceptual</span>
+          <label class="chk-label">
+            <input type="checkbox" id="togP">
+            <span class="chk-box"></span>
+            <strong>Perceptual Matching</strong>
+          </label>
+        </div>
+        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Independent of palette consolidation — remaps every pixel to its nearest palette color using perceptual distance instead of RGB. Fixes color assignment distortions that RGB nearest-neighbor introduces, especially in blues and purples.</p>
+        <div class="srow" id="perceptualRow">
+          <span class="slabel">Color Space</span>
           <select id="perceptualMode" class="sel-styled">
-            <option value="off" selected>Off — nearest color in RGB space</option>
             <option value="lab">CIE LAB — perceptually uniform, industry standard</option>
-            <option value="oklab">OKLab — improved hue uniformity, better blues &amp; purples</option>
+            <option value="oklab" selected>OKLab — improved hue uniformity, better blues &amp; purples</option>
           </select>
         </div>
-        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Final remap pass — each pixel is assigned to its nearest palette color using the chosen color space distance. CIE LAB corrects RGB's perceptual non-uniformity. OKLab additionally fixes LAB's hue linearity issues in blues and purples, making it the more accurate modern choice.</p>
 
         <div class="preview-wrap">
           <div class="prev-label">Preview — After Noise Removal</div>
@@ -1073,6 +1079,7 @@ async function runPipeline(){
     const doConsolidate=$('consolidate').checked;
     const maxC=Math.max(2,parseInt($('maxColors').value)||32);
     const algo=$('quantAlgo').value;
+    const doPerceptual=$('togP').checked;
     const perceptualMode=$('perceptualMode').value;
 
     const cBefore=countColors(inp);
@@ -1085,11 +1092,22 @@ async function runPipeline(){
     $('cAfter').textContent=cAfter;
 
     await tick();
-    if(doConsolidate&&(cAfter>maxC||perceptualMode!=='off')){
-      proc=quantize(noised,maxC,algo,perceptualMode);
+    if(doConsolidate&&cAfter>maxC){
+      proc=quantize(noised,maxC,algo,'off');
     } else {
       proc=noised;
     }
+
+    // Perceptual remap — independent of consolidation
+    if(doPerceptual){
+      const colorMap=getColorMap(proc);
+      const palette=[...colorMap.values()];
+      const lookup=perceptualMode==='oklab'
+        ?buildOKLabLookup(colorMap,palette)
+        :buildLABLookup(colorMap,palette);
+      proc=remapPixels(proc,lookup);
+    }
+
     S.denoised=proc;
 
     const cFinal=countColors(proc);
@@ -1199,24 +1217,26 @@ $('noiseT').addEventListener('input',function(){
   $('noiseTVal').textContent=this.value;
   clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },700);
 });
-['noiseNbr','noiseAP','consolidate'].forEach(id=>{
+['noiseNbr','noiseAP','consolidate','togP'].forEach(id=>{
   $(id).addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 });
 $('quantAlgo').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 $('perceptualMode').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 $('maxColors').addEventListener('change',()=>{ clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },400); });
 
-// Show/hide consolidate sub-options
+// Dim perceptual sub-option when toggle is off
+$('togP').addEventListener('change',function(){
+  $('perceptualRow').style.opacity=this.checked?'1':'.35';
+  $('perceptualRow').style.pointerEvents=this.checked?'auto':'none';
+});
+
+// Dim consolidate sub-options when toggle is off
 $('consolidate').addEventListener('change',function(){
   const on=this.checked;
-  $('consolidateOptions').style.opacity=on?'1':'.35';
-  $('consolidateOptions').style.pointerEvents=on?'auto':'none';
-  $('maxColorsRow').style.opacity=on?'1':'.35';
-  $('maxColorsRow').style.pointerEvents=on?'auto':'none';
-});
-$('consolidate').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
-$('maxColors').addEventListener('change',()=>{
-  clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },400);
+  ['consolidateOptions','maxColorsRow'].forEach(id=>{
+    $(id).style.opacity=on?'1':'.35';
+    $(id).style.pointerEvents=on?'auto':'none';
+  });
 });
 
 // Collapsible step bodies
