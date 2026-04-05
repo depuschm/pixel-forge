@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PIXELFORGE — Nano Banana → Pixel Art</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #08080f;
+  --surface: #0f0f1a;
+  --surface2: #16162a;
+  --surface3: #1c1c32;
+  --border: #242438;
+  --border-hi: #383860;
+  --text: #d8deff;
+  --muted: #5e607a;
+  --green: #1df28a;
+  --pink: #f2367a;
+  --blue: #4daaff;
+  --amber: #ffc53d;
+  --orange: #ff7a2f;
+  --red: #ff4466;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'Space Mono',monospace;font-size:12px;min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(80,80,160,.028) 1px,transparent 1px),linear-gradient(90deg,rgba(80,80,160,.028) 1px,transparent 1px);background-size:20px 20px;pointer-events:none;z-index:0}
+
+.wrap{max-width:860px;margin:0 auto;padding:28px 16px;position:relative;z-index:1}
+
+/* HEADER */
+header{text-align:center;margin-bottom:32px;padding-bottom:24px;border-bottom:1px solid var(--border)}
+.logo{font-family:'Press Start 2P',monospace;font-size:20px;letter-spacing:3px;color:var(--green);text-shadow:0 0 30px rgba(29,242,138,.45);margin-bottom:10px}
+.logo em{color:var(--pink);font-style:normal}
+.sub{color:var(--muted);font-size:10px;letter-spacing:2px;text-transform:uppercase}
+
+/* DROP ZONE */
+.drop-zone{border:2px dashed var(--border-hi);background:var(--surface);padding:44px 24px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;margin-bottom:20px;position:relative}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--green);background:rgba(29,242,138,.04)}
+.drop-zone.has-img{padding:12px;border-style:solid;border-color:var(--border)}
+.dz-icon{font-size:36px;display:block;margin-bottom:10px;opacity:.4}
+.dz-text{color:var(--muted);font-size:11px;line-height:1.8}
+.dz-text strong{color:var(--text);display:block;font-size:12px;margin-bottom:4px}
+#origCanvas{display:none;max-width:100%;max-height:280px;image-rendering:pixelated}
+.dz-meta{font-size:9px;color:var(--muted);margin-top:6px}
+
+/* ACTIONS BAR */
+.run-bar{display:flex;gap:12px;justify-content:center;align-items:center;margin-bottom:28px}
+.btn-run{font-family:'Press Start 2P',monospace;font-size:9px;padding:12px 28px;background:var(--green);color:#000;border:none;cursor:pointer;letter-spacing:2px;text-transform:uppercase;transition:all .12s;box-shadow:0 4px 0 rgba(29,242,138,.25)}
+.btn-run:hover{background:#0dcc70;transform:translateY(-1px);box-shadow:0 6px 0 rgba(29,242,138,.2)}
+.btn-run:active{transform:translateY(2px);box-shadow:none}
+.btn-run:disabled{opacity:.3;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-dl{font-family:'Press Start 2P',monospace;font-size:9px;padding:12px 24px;background:transparent;color:var(--pink);border:2px solid var(--pink);cursor:pointer;letter-spacing:2px;text-decoration:none;display:none;transition:all .12s}
+.btn-dl:hover{background:var(--pink);color:#000}
+
+/* PIPELINE */
+.pipeline{display:flex;flex-direction:column;gap:0}
+.connector{width:2px;height:18px;background:var(--border);margin-left:18px;transition:background .3s}
+.connector.live{background:var(--green)}
+
+/* STEP CARD */
+.step-card{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--border);transition:border-color .2s}
+.step-card.live{border-left-color:var(--green)}
+.step-card.running-state{border-left-color:var(--orange)}
+.step-card.skip-state{border-left-color:var(--border)}
+
+.step-hdr{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border)}
+.step-hdr:hover{background:rgba(255,255,255,.02)}
+
+.step-num{font-family:'Press Start 2P',monospace;font-size:9px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.live .step-num{color:var(--green);border-color:var(--green)}
+
+.step-meta{flex:1}
+.step-name{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.8px}
+.step-desc{color:var(--muted);font-size:10px;margin-top:2px}
+
+.step-badge{font-size:8px;font-family:'Press Start 2P',monospace;padding:2px 6px;border:1px solid;letter-spacing:.5px}
+.badge-done{color:var(--green);border-color:var(--green)}
+.badge-run{color:var(--orange);border-color:var(--orange);animation:pulse 1s infinite}
+.badge-skip{color:var(--muted);border-color:var(--muted)}
+.badge-wait{color:var(--border-hi);border-color:var(--border)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Toggle */
+.toggle{position:relative;width:38px;height:20px;flex-shrink:0}
+.toggle input{display:none}
+.tog-sl{position:absolute;inset:0;background:var(--surface2);border:1px solid var(--border-hi);cursor:pointer;transition:all .2s}
+.tog-sl::after{content:'';position:absolute;width:12px;height:12px;background:var(--muted);top:3px;left:3px;transition:all .2s}
+.toggle input:checked+.tog-sl{background:rgba(29,242,138,.12);border-color:var(--green)}
+.toggle input:checked+.tog-sl::after{background:var(--green);left:21px}
+
+/* Step Body */
+.step-body{padding:14px 16px;display:none}
+.step-body.open{display:block}
+
+/* Settings rows */
+.srow{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.slabel{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.4px;min-width:110px;flex-shrink:0}
+
+input[type=range]{flex:1;min-width:100px;-webkit-appearance:none;height:3px;background:var(--surface2);border:1px solid var(--border);outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;background:var(--green);cursor:pointer}
+
+input[type=number]{background:var(--surface2);border:1px solid var(--border-hi);color:var(--text);font-family:'Space Mono',monospace;font-size:11px;padding:4px 8px;width:58px;outline:none}
+input[type=number]:focus{border-color:var(--green)}
+
+.val-disp{font-size:11px;color:var(--blue);min-width:28px;text-align:right}
+
+/* Checkbox */
+.chk-label{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;color:var(--text)}
+.chk-label input{display:none}
+.chk-box{width:15px;height:15px;border:1px solid var(--border-hi);background:var(--surface2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--green);transition:border-color .2s}
+.chk-label input:checked+.chk-box{border-color:var(--green)}
+.chk-label input:checked+.chk-box::after{content:'✓'}
+
+/* Preview */
+.preview-wrap{margin-top:14px;border-top:1px solid var(--border);padding-top:14px}
+.prev-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.canvas-bg{background:repeating-conic-gradient(#191926 0% 25%,#131320 25% 50%) 0 0/14px 14px;display:inline-block;max-width:100%;overflow:hidden}
+canvas.prev{display:block;max-width:100%;max-height:200px;image-rendering:pixelated}
+
+/* Sprite grid */
+.sprite-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:8px;margin-top:12px;max-height:220px;overflow-y:auto;padding-right:4px}
+.sprite-grid::-webkit-scrollbar{width:4px}
+.sprite-grid::-webkit-scrollbar-track{background:var(--surface2)}
+.sprite-grid::-webkit-scrollbar-thumb{background:var(--border-hi)}
+.sp-item{border:2px solid var(--border);background:repeating-conic-gradient(#191926 0% 25%,#131320 25% 50%) 0 0/8px 8px;cursor:pointer;display:flex;flex-direction:column;align-items:center;padding:5px;transition:border-color .15s;gap:4px}
+.sp-item:hover{border-color:var(--muted)}
+.sp-item.sel{border-color:var(--green)}
+.sp-item canvas{image-rendering:pixelated;max-width:58px;max-height:58px}
+.sp-lbl{font-size:8px;color:var(--muted);white-space:nowrap}
+.sp-item.sel .sp-lbl{color:var(--green)}
+
+/* Pixel size display */
+.ps-box{display:flex;align-items:center;gap:14px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);margin-bottom:12px}
+.ps-val{font-family:'Press Start 2P',monospace;font-size:22px;color:var(--amber);line-height:1}
+.ps-info{font-size:10px;color:var(--muted);margin-top:2px}
+.ps-info strong{color:var(--text)}
+
+/* Stats */
+.stats{display:flex;gap:8px;margin-bottom:12px}
+.stat{flex:1;background:var(--surface2);border:1px solid var(--border);padding:8px 10px;text-align:center}
+.stat-v{font-family:'Press Start 2P',monospace;font-size:13px;color:var(--blue)}
+.stat-l{font-size:9px;color:var(--muted);margin-top:4px}
+
+/* Color palette */
+.palette{display:flex;flex-wrap:wrap;gap:3px;margin-top:8px}
+.swatch{width:14px;height:14px;border:1px solid rgba(255,255,255,.08)}
+
+/* Info text */
+.info-text{font-size:10px;color:var(--muted);line-height:1.7;margin-bottom:12px}
+.info-text code{color:var(--blue);font-family:'Space Mono',monospace}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--surface)}
+::-webkit-scrollbar-thumb{background:var(--border-hi)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo">PIXEL<em>FORGE</em></div>
+    <div class="sub">Nano Banana Pro &rarr; Perfect Pixel Art Pipeline</div>
+  </header>
+
+  <!-- DROP ZONE -->
+  <div class="drop-zone" id="dropZone">
+    <div id="dzContent">
+      <span class="dz-icon">🖼</span>
+      <div class="dz-text">
+        <strong>Drop your Nano Banana Pro image here</strong>
+        or click to browse &mdash; PNG with transparency recommended
+      </div>
+    </div>
+    <canvas id="origCanvas"></canvas>
+    <div class="dz-meta" id="dzMeta"></div>
+    <input type="file" id="fileInput" accept="image/*" style="display:none">
+  </div>
+
+  <!-- RUN BAR -->
+  <div class="run-bar">
+    <button class="btn-run" id="runBtn" disabled>▶ RUN PIPELINE</button>
+    <a class="btn-dl" id="dlBtn" href="#" download="pixel-art.png">⬇ DOWNLOAD</a>
+  </div>
+
+  <!-- PIPELINE -->
+  <div class="pipeline">
+
+    <!-- ── STEP 1 ── SPRITE DETECTION -->
+    <div class="step-card" id="card1">
+      <div class="step-hdr" id="hdr1">
+        <div class="step-num">1</div>
+        <div class="step-meta">
+          <div class="step-name">Sprite Detection <span style="font-size:9px;color:var(--muted)">(optional)</span></div>
+          <div class="step-desc">Isolate sprites separated by transparent pixels</div>
+        </div>
+        <span id="badge1" class="step-badge badge-wait">WAIT</span>
+        <label class="toggle" title="Enable sprite detection" onclick="event.stopPropagation()">
+          <input type="checkbox" id="tog1">
+          <span class="tog-sl"></span>
+        </label>
+      </div>
+      <div class="step-body open" id="body1">
+        <p class="info-text">When enabled, all sprites separated by fully transparent pixels are detected automatically. Select a sprite or use the full image (default).</p>
+        <div id="spriteContainer">
+          <span style="color:var(--muted);font-size:10px;font-style:italic">Load an image and run the pipeline to detect sprites…</span>
+        </div>
+        <div class="preview-wrap">
+          <div class="prev-label">Preview — Selected Region</div>
+          <div class="canvas-bg"><canvas class="prev" id="prev1"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="conn1"></div>
+
+    <!-- ── STEP 2 ── PIXEL SIZE -->
+    <div class="step-card" id="card2">
+      <div class="step-hdr" id="hdr2">
+        <div class="step-num">2</div>
+        <div class="step-meta">
+          <div class="step-name">Pixel Size Detection</div>
+          <div class="step-desc">Find the consistent pixel block size</div>
+        </div>
+        <span id="badge2" class="step-badge badge-wait">WAIT</span>
+      </div>
+      <div class="step-body open" id="body2">
+        <div class="ps-box">
+          <div class="ps-val" id="psVal">?</div>
+          <div>
+            <div style="font-size:11px;font-weight:700">px × px</div>
+            <div class="ps-info" id="psInfo">Auto-detected from run-length analysis</div>
+          </div>
+        </div>
+        <div class="srow">
+          <label class="chk-label">
+            <input type="checkbox" id="manualPS">
+            <span class="chk-box"></span>
+            Manual Override
+          </label>
+        </div>
+        <div class="srow" id="manualRow" style="display:none">
+          <span class="slabel">Pixel Size</span>
+          <input type="number" id="psInput" min="1" max="128" value="8">
+          <span style="font-size:10px;color:var(--muted)">px</span>
+        </div>
+        <div class="preview-wrap">
+          <div class="prev-label">Preview — Pixel Grid Overlay</div>
+          <div class="canvas-bg"><canvas class="prev" id="prev2"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="conn2"></div>
+
+    <!-- ── STEP 3 ── NOISE REMOVAL -->
+    <div class="step-card" id="card3">
+      <div class="step-hdr" id="hdr3">
+        <div class="step-num">3</div>
+        <div class="step-meta">
+          <div class="step-name">Noise Removal <span style="font-size:9px;color:var(--muted)">(optional)</span></div>
+          <div class="step-desc">Merge similar-colored pixels to reduce color count</div>
+        </div>
+        <span id="badge3" class="step-badge badge-wait">WAIT</span>
+        <label class="toggle" title="Enable noise removal" onclick="event.stopPropagation()">
+          <input type="checkbox" id="tog3" checked>
+          <span class="tog-sl"></span>
+        </label>
+      </div>
+      <div class="step-body open" id="body3">
+        <div class="stats" id="noiseStats" style="display:none">
+          <div class="stat"><div class="stat-v" id="cBefore">—</div><div class="stat-l">Colors Before</div></div>
+          <div class="stat"><div class="stat-v" id="cAfter">—</div><div class="stat-l">Colors After</div></div>
+          <div class="stat"><div class="stat-v" id="cReduce">—</div><div class="stat-l">Reduction</div></div>
+        </div>
+
+        <div class="srow">
+          <span class="slabel">Threshold</span>
+          <input type="range" id="noiseT" min="1" max="100" value="30">
+          <span class="val-disp" id="noiseTVal">30</span>
+        </div>
+        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 120px">Color distance cutoff (0 = off, 100 = aggressive merge)</p>
+
+        <div class="srow">
+          <label class="chk-label">
+            <input type="checkbox" id="noiseNbr">
+            <span class="chk-box"></span>
+            Neighbored — only merge spatially connected pixels
+          </label>
+        </div>
+        <div class="srow">
+          <label class="chk-label">
+            <input type="checkbox" id="noiseAP">
+            <span class="chk-box"></span>
+            Affect previously changed pixels (allows multi-pass merging)
+          </label>
+        </div>
+
+        <div class="preview-wrap">
+          <div class="prev-label">Preview — After Noise Removal</div>
+          <div class="canvas-bg"><canvas class="prev" id="prev3"></canvas></div>
+        </div>
+        <div id="paletteWrap" style="display:none;margin-top:10px">
+          <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Resulting Color Palette</div>
+          <div class="palette" id="palette"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="conn3"></div>
+
+    <!-- ── STEP 4 ── SCALE DOWN -->
+    <div class="step-card" id="card4">
+      <div class="step-hdr" id="hdr4">
+        <div class="step-num">4</div>
+        <div class="step-meta">
+          <div class="step-name">Scale Down</div>
+          <div class="step-desc">Reduce to true pixel art resolution</div>
+        </div>
+        <span id="badge4" class="step-badge badge-wait">WAIT</span>
+      </div>
+      <div class="step-body open" id="body4">
+        <div class="stats">
+          <div class="stat"><div class="stat-v" id="inDims">—</div><div class="stat-l">Input</div></div>
+          <div class="stat"><div class="stat-v" style="color:var(--muted)">÷ P</div><div class="stat-l">Pixel Size</div></div>
+          <div class="stat"><div class="stat-v" id="outDims">—</div><div class="stat-l">Output</div></div>
+        </div>
+        <p style="font-size:9px;color:var(--muted);margin-bottom:12px">Each pixel block is reduced to its dominant color (mode sampling)</p>
+        <div class="preview-wrap">
+          <div class="prev-label">Preview — Final Pixel Art <span style="color:var(--muted)">(4× zoom)</span></div>
+          <div class="canvas-bg"><canvas class="prev" id="prev4" style="image-rendering:pixelated"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /pipeline -->
+</div><!-- /wrap -->
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+const S = {
+  origData: null,       // ImageData — full original
+  selData: null,        // ImageData — after step 1 selection
+  sprites: [],          // [{id,x,y,w,h,pixelCount}]
+  selSprite: 'full',    // 'full' or sprite.id
+  pixelSize: 8,         // detected or manual
+  denoised: null,       // ImageData — after step 3
+  final: null,          // ImageData — after step 4
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function colorDist(r1,g1,b1,r2,g2,b2){
+  return Math.sqrt((r1-r2)**2+(g1-g2)**2+(b1-b2)**2);
+}
+
+function gcd(a,b){ while(b){[a,b]=[b,a%b];} return a; }
+
+function tick(){ return new Promise(r=>setTimeout(r,8)); }
+
+function cloneID(id){ return new ImageData(new Uint8ClampedArray(id.data),id.width,id.height); }
+
+function cropID(id,x,y,w,h){
+  const c=document.createElement('canvas');
+  c.width=id.width; c.height=id.height;
+  c.getContext('2d').putImageData(id,0,0);
+  const out=document.createElement('canvas');
+  out.width=w; out.height=h;
+  out.getContext('2d').drawImage(c,x,y,w,h,0,0,w,h);
+  return out.getContext('2d').getImageData(0,0,w,h);
+}
+
+function idToCanvas(id){
+  const c=document.createElement('canvas');
+  c.width=id.width; c.height=id.height;
+  c.getContext('2d').putImageData(id,0,0);
+  return c;
+}
+
+function countColors(id){
+  const s=new Set();
+  for(let i=0;i<id.data.length;i+=4){
+    if(id.data[i+3]<128) continue;
+    s.add((id.data[i]<<16)|(id.data[i+1]<<8)|id.data[i+2]);
+  }
+  return s.size;
+}
+
+function getPalette(id,max=64){
+  const m=new Map();
+  for(let i=0;i<id.data.length;i+=4){
+    if(id.data[i+3]<128) continue;
+    const k=(id.data[i]<<16)|(id.data[i+1]<<8)|id.data[i+2];
+    m.set(k,(m.get(k)||0)+1);
+  }
+  return [...m.entries()].sort((a,b)=>b[1]-a[1]).slice(0,max).map(([k])=>{
+    return `rgb(${(k>>16)&255},${(k>>8)&255},${k&255})`;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 1 — SPRITE DETECTION
+// ─────────────────────────────────────────────────────────────────────────────
+function detectSprites(id){
+  const {data,width,height}=id;
+  const lbl=new Int32Array(width*height).fill(-1);
+  const sprites=[];
+  let nextLbl=0;
+
+  for(let y=0;y<height;y++){
+    for(let x=0;x<width;x++){
+      const idx=y*width+x;
+      if(data[idx*4+3]<10||lbl[idx]!==-1) continue;
+
+      const q=[idx]; lbl[idx]=nextLbl;
+      let head=0,minX=x,maxX=x,minY=y,maxY=y,cnt=0;
+
+      while(head<q.length){
+        const cur=q[head++]; cnt++;
+        const cx=cur%width, cy=Math.floor(cur/width);
+        if(cx<minX)minX=cx; if(cx>maxX)maxX=cx;
+        if(cy<minY)minY=cy; if(cy>maxY)maxY=cy;
+        const ns=[cy>0?cur-width:-1,cy<height-1?cur+width:-1,cx>0?cur-1:-1,cx<width-1?cur+1:-1];
+        for(const n of ns){
+          if(n>=0&&n<width*height&&lbl[n]===-1&&data[n*4+3]>=10){
+            lbl[n]=nextLbl; q.push(n);
+          }
+        }
+      }
+      if(cnt>16){
+        sprites.push({id:nextLbl,x:minX,y:minY,w:maxX-minX+1,h:maxY-minY+1,pixelCount:cnt});
+      }
+      nextLbl++;
+    }
+  }
+  return sprites;
+}
+
+function renderSpriteGrid(sprites){
+  const con=$('spriteContainer');
+  con.innerHTML='';
+  if(sprites.length===0){
+    con.innerHTML='<span style="color:var(--muted);font-size:10px">No distinct sprites found. Using full image.</span>';
+    return;
+  }
+  const grid=document.createElement('div');
+  grid.className='sprite-grid';
+
+  // Full image option (always first)
+  grid.appendChild(makeSpriteItem('full','Full Image',S.origData,0,0,S.origData.width,S.origData.height,true));
+
+  for(const sp of sprites){
+    grid.appendChild(makeSpriteItem(sp.id,`${sp.w}×${sp.h}`,S.origData,sp.x,sp.y,sp.w,sp.h,false));
+  }
+  con.appendChild(grid);
+
+  const info=document.createElement('div');
+  info.style.cssText='font-size:9px;color:var(--muted);margin-top:6px';
+  info.textContent=`${sprites.length} sprite${sprites.length!==1?'s':''} detected — click to select`;
+  con.appendChild(info);
+}
+
+function makeSpriteItem(spId,label,id,x,y,w,h,selected){
+  const item=document.createElement('div');
+  item.className='sp-item'+(selected?' sel':'');
+  item.dataset.sid=spId;
+
+  const maxThumb=60;
+  const sc=Math.min(maxThumb/w,maxThumb/h,1);
+  const tw=Math.max(1,Math.round(w*sc)), th=Math.max(1,Math.round(h*sc));
+
+  const c=document.createElement('canvas');
+  c.width=tw; c.height=th;
+  c.getContext('2d').drawImage(idToCanvas(id),x,y,w,h,0,0,tw,th);
+
+  const lbl=document.createElement('div');
+  lbl.className='sp-lbl'; lbl.textContent=label;
+
+  item.appendChild(c); item.appendChild(lbl);
+
+  item.addEventListener('click',()=>{
+    document.querySelectorAll('.sp-item').forEach(el=>el.classList.remove('sel'));
+    item.classList.add('sel');
+    S.selSprite=spId;
+    applySelection();
+    drawPrev($('prev1'),S.selData);
+  });
+  return item;
+}
+
+function applySelection(){
+  if(S.selSprite==='full'||!$('tog1').checked){
+    S.selData=S.origData;
+  } else {
+    const sp=S.sprites.find(s=>s.id===S.selSprite);
+    S.selData=sp?cropID(S.origData,sp.x,sp.y,sp.w,sp.h):S.origData;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 2 — PIXEL SIZE DETECTION
+// ─────────────────────────────────────────────────────────────────────────────
+function detectPixelSize(id){
+  const {data,width,height}=id;
+  const hist={};
+  const thresh=32;
+
+  function addRun(len){ if(len>=2&&len<=128) hist[len]=(hist[len]||0)+1; }
+
+  // Sample rows
+  const rStep=Math.max(1,Math.floor(height/50));
+  for(let y=0;y<height;y+=rStep){
+    let rStart=0;
+    let pi=(y*width)*4;
+    let pr=data[pi],pg=data[pi+1],pb=data[pi+2],pa=data[pi+3];
+    for(let x=1;x<width;x++){
+      const i=(y*width+x)*4;
+      const r=data[i],g=data[i+1],b=data[i+2],a=data[i+3];
+      if(a<10||pa<10){ if(a>=10)rStart=x; pr=r;pg=g;pb=b;pa=a; continue; }
+      if(colorDist(r,g,b,pr,pg,pb)>thresh){ addRun(x-rStart); rStart=x; pr=r;pg=g;pb=b;pa=a; }
+    }
+  }
+  // Sample columns
+  const cStep=Math.max(1,Math.floor(width/50));
+  for(let x=0;x<width;x+=cStep){
+    let rStart=0;
+    let pi=x*4;
+    let pr=data[pi],pg=data[pi+1],pb=data[pi+2],pa=data[pi+3];
+    for(let y=1;y<height;y++){
+      const i=(y*width+x)*4;
+      const r=data[i],g=data[i+1],b=data[i+2],a=data[i+3];
+      if(a<10||pa<10){ if(a>=10)rStart=y; pr=r;pg=g;pb=b;pa=a; continue; }
+      if(colorDist(r,g,b,pr,pg,pb)>thresh){ addRun(y-rStart); rStart=y; pr=r;pg=g;pb=b;pa=a; }
+    }
+  }
+
+  if(Object.keys(hist).length===0) return 4;
+
+  const sorted=Object.entries(hist).sort((a,b)=>b[1]-a[1]).slice(0,16).map(([k])=>parseInt(k));
+  let g=sorted[0];
+  for(let i=1;i<Math.min(sorted.length,10);i++){
+    const ng=gcd(g,sorted[i]);
+    if(ng>=2) g=ng; else break;
+  }
+
+  const common=[1,2,3,4,5,6,7,8,10,12,14,16,18,20,24,28,32,40,48,64];
+  return common.reduce((p,c)=>Math.abs(c-g)<Math.abs(p-g)?c:p);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 3 — NOISE REMOVAL
+// ─────────────────────────────────────────────────────────────────────────────
+function removeNoise(id,threshold,neighbored,affectPrev){
+  const {data,width,height}=id;
+  const result=new Uint8ClampedArray(data);
+  const processed=new Uint8Array(width*height);
+  const maxDist=threshold*1.8; // map 0-100 → 0-180
+
+  for(let idx=0;idx<width*height;idx++){
+    const di=idx*4;
+    if(result[di+3]<10) continue;
+    if(!affectPrev&&processed[idx]) continue;
+
+    const br=result[di],bg=result[di+1],bb=result[di+2];
+    const group=[];
+
+    if(neighbored){
+      // BFS: connected region of similar colors
+      const vis=new Uint8Array(width*height);
+      const q=[idx]; vis[idx]=1; let head=0;
+      while(head<q.length){
+        const cur=q[head++];
+        if(!affectPrev&&processed[cur]) continue;
+        const ci=cur*4;
+        if(result[ci+3]<10) continue;
+        const cr=result[ci],cg=result[ci+1],cb=result[ci+2];
+        if(colorDist(cr,cg,cb,br,bg,bb)>maxDist) continue;
+        group.push(cur);
+        const cx=cur%width,cy=Math.floor(cur/width);
+        const ns=[cy>0?cur-width:-1,cy<height-1?cur+width:-1,cx>0?cur-1:-1,cx<width-1?cur+1:-1];
+        for(const n of ns){ if(n>=0&&n<width*height&&!vis[n]){vis[n]=1;q.push(n);} }
+      }
+    } else {
+      // Global: all pixels within threshold of base color
+      for(let j=0;j<width*height;j++){
+        if(!affectPrev&&processed[j]) continue;
+        const ji=j*4;
+        if(result[ji+3]<10) continue;
+        if(colorDist(result[ji],result[ji+1],result[ji+2],br,bg,bb)<=maxDist) group.push(j);
+      }
+    }
+
+    if(group.length===0) continue;
+
+    // Mean color
+    let sR=0,sG=0,sB=0;
+    for(const j of group){ sR+=result[j*4]; sG+=result[j*4+1]; sB+=result[j*4+2]; }
+    const n=group.length;
+    const mR=Math.round(sR/n),mG=Math.round(sG/n),mB=Math.round(sB/n);
+
+    for(const j of group){
+      result[j*4]=mR; result[j*4+1]=mG; result[j*4+2]=mB;
+      processed[j]=1;
+    }
+  }
+  return new ImageData(result,width,height);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP 4 — SCALE DOWN
+// ─────────────────────────────────────────────────────────────────────────────
+function scaleDown(id,P){
+  const {data,width,height}=id;
+  const outW=Math.max(1,Math.floor(width/P));
+  const outH=Math.max(1,Math.floor(height/P));
+  const outD=new Uint8ClampedArray(outW*outH*4);
+
+  for(let by=0;by<outH;by++){
+    for(let bx=0;bx<outW;bx++){
+      const cmap=new Map();
+      let topC=0,topK=null,hasOpaque=false;
+
+      for(let dy=0;dy<P;dy++){
+        for(let dx=0;dx<P;dx++){
+          const sx=bx*P+dx, sy=by*P+dy;
+          if(sx>=width||sy>=height) continue;
+          const i=(sy*width+sx)*4;
+          if(data[i+3]<128) continue;
+          hasOpaque=true;
+          const k=(data[i]<<16)|(data[i+1]<<8)|data[i+2];
+          const cnt=(cmap.get(k)||0)+1;
+          cmap.set(k,cnt);
+          if(cnt>topC){topC=cnt;topK=k;}
+        }
+      }
+
+      const oi=(by*outW+bx)*4;
+      if(hasOpaque&&topK!==null){
+        outD[oi]=(topK>>16)&255; outD[oi+1]=(topK>>8)&255; outD[oi+2]=topK&255; outD[oi+3]=255;
+      }
+    }
+  }
+  return new ImageData(outD,outW,outH);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CANVAS / UI HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function drawPrev(canvas,id){
+  if(!id){canvas.width=0;canvas.height=0;return;}
+  canvas.width=id.width; canvas.height=id.height;
+  canvas.getContext('2d').putImageData(id,0,0);
+}
+
+function drawGridOverlay(canvas,id,P){
+  if(!id){canvas.width=0;return;}
+  const {width,height}=id;
+  canvas.width=width; canvas.height=height;
+  const ctx=canvas.getContext('2d');
+  ctx.putImageData(id,0,0);
+  ctx.strokeStyle='rgba(255,220,0,.5)';
+  ctx.lineWidth=.5;
+  for(let x=0;x<=width;x+=P){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();}
+  for(let y=0;y<=height;y+=P){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();}
+}
+
+function drawZoomed(canvas,id,zoom){
+  if(!id){canvas.width=0;return;}
+  canvas.width=id.width*zoom; canvas.height=id.height*zoom;
+  const ctx=canvas.getContext('2d');
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(idToCanvas(id),0,0,id.width*zoom,id.height*zoom);
+}
+
+function setBadge(step,cls,txt){
+  const el=$(`badge${step}`);
+  el.className=`step-badge ${cls}`;
+  el.textContent=txt;
+}
+
+function setCardLive(step,live){
+  const card=$(`card${step}`);
+  card.classList.toggle('live',live);
+  if(step<4) $(`conn${step}`).classList.toggle('live',live);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIPELINE RUNNER
+// ─────────────────────────────────────────────────────────────────────────────
+let debounce=null;
+
+async function runPipeline(){
+  if(!S.origData) return;
+  $('dlBtn').style.display='none';
+
+  [1,2,3,4].forEach(n=>{ setBadge(n,'badge-wait','WAIT'); setCardLive(n,false); });
+
+  // ── STEP 1 ──────────────────────────────────────────────────────────────
+  setBadge(1,'badge-run','RUN');
+  await tick();
+  const s1on=$('tog1').checked;
+
+  if(s1on){
+    S.sprites=detectSprites(S.origData);
+    // reset selection to full if sprite no longer exists
+    if(S.selSprite!=='full'&&!S.sprites.find(s=>s.id===S.selSprite)) S.selSprite='full';
+    renderSpriteGrid(S.sprites);
+  } else {
+    S.sprites=[]; S.selSprite='full';
+    $('spriteContainer').innerHTML='<span style="color:var(--muted);font-size:10px;font-style:italic">Step disabled — using full image.</span>';
+  }
+
+  applySelection();
+  drawPrev($('prev1'),S.selData);
+  setBadge(1,s1on?'badge-done':'badge-skip',s1on?'DONE':'SKIP');
+  setCardLive(1,s1on);
+  await tick();
+
+  // ── STEP 2 ──────────────────────────────────────────────────────────────
+  setBadge(2,'badge-run','RUN');
+  await tick();
+  const inp=S.selData||S.origData;
+
+  if($('manualPS').checked){
+    S.pixelSize=Math.max(1,parseInt($('psInput').value)||1);
+    $('psInfo').textContent='Manual override active';
+  } else {
+    S.pixelSize=detectPixelSize(inp);
+    $('psInfo').textContent='Auto-detected from run-length analysis';
+  }
+
+  $('psVal').textContent=String(S.pixelSize);
+  drawGridOverlay($('prev2'),inp,S.pixelSize);
+
+  const outW=Math.floor(inp.width/S.pixelSize);
+  const outH=Math.floor(inp.height/S.pixelSize);
+  $('inDims').textContent=`${inp.width}×${inp.height}`;
+  $('outDims').textContent=`${outW}×${outH}`;
+
+  setBadge(2,'badge-done','DONE'); setCardLive(2,true);
+  await tick();
+
+  // ── STEP 3 ──────────────────────────────────────────────────────────────
+  setBadge(3,'badge-run','RUN');
+  await tick();
+  const s3on=$('tog3').checked;
+  let proc=inp;
+
+  if(s3on){
+    const t=parseInt($('noiseT').value);
+    const nbr=$('noiseNbr').checked;
+    const ap=$('noiseAP').checked;
+
+    const cBefore=countColors(inp);
+    $('cBefore').textContent=cBefore;
+    $('noiseStats').style.display='flex';
+
+    await tick();
+    proc=removeNoise(inp,t,nbr,ap);
+    S.denoised=proc;
+
+    const cAfter=countColors(proc);
+    $('cAfter').textContent=cAfter;
+    const reduction=cBefore>0?Math.round((1-cAfter/cBefore)*100):0;
+    $('cReduce').textContent=reduction+'%';
+
+    drawPrev($('prev3'),proc);
+
+    // palette
+    const pal=getPalette(proc,72);
+    const pw=$('palette'); pw.innerHTML='';
+    for(const c of pal){
+      const sw=document.createElement('div');
+      sw.className='swatch'; sw.style.background=c; sw.title=c;
+      pw.appendChild(sw);
+    }
+    $('paletteWrap').style.display='block';
+
+    setBadge(3,'badge-done','DONE'); setCardLive(3,true);
+  } else {
+    S.denoised=null;
+    $('noiseStats').style.display='none';
+    $('paletteWrap').style.display='none';
+    $('prev3').width=0;
+    setBadge(3,'badge-skip','SKIP'); setCardLive(3,false);
+  }
+  await tick();
+
+  // ── STEP 4 ──────────────────────────────────────────────────────────────
+  setBadge(4,'badge-run','RUN');
+  await tick();
+
+  S.final=scaleDown(proc,S.pixelSize);
+  const zoom=Math.max(1,Math.min(8,Math.floor(200/Math.max(S.final.width,S.final.height)))||4);
+  drawZoomed($('prev4'),S.final,Math.max(2,zoom));
+
+  setBadge(4,'badge-done','DONE'); setCardLive(4,true);
+
+  // download
+  idToCanvas(S.final).toBlob(blob=>{
+    const url=URL.createObjectURL(blob);
+    const dl=$('dlBtn');
+    dl.href=url; dl.style.display='inline-block';
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMAGE LOADING
+// ─────────────────────────────────────────────────────────────────────────────
+function loadFile(file){
+  if(!file||!file.type.startsWith('image/')) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const c=document.createElement('canvas');
+      c.width=img.width; c.height=img.height;
+      const ctx=c.getContext('2d');
+      ctx.drawImage(img,0,0);
+      S.origData=ctx.getImageData(0,0,img.width,img.height);
+      S.selData=S.origData;
+
+      // Show in drop zone
+      const oc=$('origCanvas');
+      oc.width=img.width; oc.height=img.height;
+      oc.getContext('2d').drawImage(img,0,0);
+      oc.style.display='block';
+      $('dzContent').style.display='none';
+      $('dropZone').classList.add('has-img');
+      $('dzMeta').textContent=`${img.width} × ${img.height}px — ${(file.size/1024).toFixed(1)} KB`;
+
+      $('runBtn').disabled=false;
+      runPipeline();
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVENT HANDLERS
+// ─────────────────────────────────────────────────────────────────────────────
+const dz=$('dropZone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag-over');loadFile(e.dataTransfer.files[0]);});
+dz.addEventListener('click',()=>$('fileInput').click());
+$('fileInput').addEventListener('change',e=>loadFile(e.target.files[0]));
+
+$('runBtn').addEventListener('click',runPipeline);
+
+// Step 1 toggle
+$('tog1').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+
+// Step 2 manual override
+$('manualPS').addEventListener('change',function(){
+  $('manualRow').style.display=this.checked?'flex':'none';
+});
+$('psInput').addEventListener('change',()=>{
+  if($('manualPS').checked&&S.origData){ clearTimeout(debounce); debounce=setTimeout(runPipeline,400); }
+});
+
+// Step 3 toggle & options
+$('tog3').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+$('noiseT').addEventListener('input',function(){
+  $('noiseTVal').textContent=this.value;
+  clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },700);
+});
+['noiseNbr','noiseAP'].forEach(id=>{
+  $(id).addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+});
+
+// Collapsible step bodies
+document.querySelectorAll('.step-hdr').forEach(hdr=>{
+  hdr.addEventListener('click',e=>{
+    if(e.target.closest('.toggle')) return;
+    const body=hdr.nextElementSibling;
+    if(body?.classList.contains('step-body')) body.classList.toggle('open');
+  });
+});
+</script>
+</body>
+</html>
