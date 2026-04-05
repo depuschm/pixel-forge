@@ -151,6 +151,12 @@ canvas.prev{display:block;max-width:100%;max-height:200px;image-rendering:pixela
 .info-text{font-size:10px;color:var(--muted);line-height:1.7;margin-bottom:12px}
 .info-text code{color:var(--blue);font-family:'Space Mono',monospace}
 
+/* Reorder buttons */
+.reorder-btns{display:flex;flex-direction:column;gap:2px;flex-shrink:0}
+.reorder-btn{background:none;border:1px solid var(--border);color:var(--muted);font-size:9px;width:18px;height:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:border-color .12s,color .12s;padding:0;line-height:1}
+.reorder-btn:hover:not(:disabled){border-color:var(--text);color:var(--text)}
+.reorder-btn:disabled{opacity:.18;cursor:not-allowed}
+
 /* Select */
 select.sel-styled{background:var(--surface2);border:1px solid var(--border-hi);color:var(--text);font-family:'Space Mono',monospace;font-size:10px;padding:5px 8px;outline:none;cursor:pointer;flex:1;min-width:0}
 select.sel-styled:focus{border-color:var(--green)}
@@ -192,11 +198,15 @@ select.sel-styled option{background:var(--surface2)}
   </div>
 
   <!-- PIPELINE -->
-  <div class="pipeline">
+  <div class="pipeline" id="pipelineSteps">
 
     <!-- ── STEP 1 ── SPRITE DETECTION -->
     <div class="step-card" id="card1">
       <div class="step-hdr" id="hdr1">
+        <div class="reorder-btns" onclick="event.stopPropagation()">
+          <button class="reorder-btn" id="up1" onclick="moveStep('1','up')">▲</button>
+          <button class="reorder-btn" id="dn1" onclick="moveStep('1','down')">▼</button>
+        </div>
         <div class="step-num">1</div>
         <div class="step-meta">
           <div class="step-name">Sprite Detection <span style="font-size:9px;color:var(--muted)">(optional)</span></div>
@@ -220,11 +230,13 @@ select.sel-styled option{background:var(--surface2)}
       </div>
     </div>
 
-    <div class="connector" id="conn1"></div>
-
     <!-- ── STEP 2 ── PIXEL SIZE -->
     <div class="step-card" id="card2">
       <div class="step-hdr" id="hdr2">
+        <div class="reorder-btns" onclick="event.stopPropagation()">
+          <button class="reorder-btn" id="up2" onclick="moveStep('2','up')">▲</button>
+          <button class="reorder-btn" id="dn2" onclick="moveStep('2','down')">▼</button>
+        </div>
         <div class="step-num">2</div>
         <div class="step-meta">
           <div class="step-name">Pixel Size Detection</div>
@@ -259,11 +271,13 @@ select.sel-styled option{background:var(--surface2)}
       </div>
     </div>
 
-    <div class="connector" id="conn2"></div>
-
     <!-- ── STEP 3 ── NOISE REMOVAL -->
     <div class="step-card" id="card3">
       <div class="step-hdr" id="hdr3">
+        <div class="reorder-btns" onclick="event.stopPropagation()">
+          <button class="reorder-btn" id="up3" onclick="moveStep('3','up')">▲</button>
+          <button class="reorder-btn" id="dn3" onclick="moveStep('3','down')">▼</button>
+        </div>
         <div class="step-num">3</div>
         <div class="step-meta">
           <div class="step-name">Noise Removal <span style="font-size:9px;color:var(--muted)">(optional)</span></div>
@@ -282,14 +296,12 @@ select.sel-styled option{background:var(--surface2)}
           <div class="stat"><div class="stat-v" id="cFinal">—</div><div class="stat-l">Final Colors</div></div>
           <div class="stat"><div class="stat-v" id="cReduce">—</div><div class="stat-l">Reduction</div></div>
         </div>
-
         <div class="srow">
           <span class="slabel">Threshold</span>
           <input type="range" id="noiseT" min="1" max="100" value="30">
           <span class="val-disp" id="noiseTVal">30</span>
         </div>
         <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 120px">Color distance cutoff (0 = off, 100 = aggressive merge)</p>
-
         <div class="srow">
           <label class="chk-label">
             <input type="checkbox" id="noiseNbr">
@@ -304,7 +316,6 @@ select.sel-styled option{background:var(--surface2)}
             Affect previously changed pixels (allows multi-pass merging)
           </label>
         </div>
-
         <div style="border-top:1px solid var(--border);margin:12px 0 10px"></div>
         <div class="srow">
           <label class="chk-label">
@@ -351,7 +362,6 @@ select.sel-styled option{background:var(--surface2)}
             <option value="oklab" selected>OKLab — improved hue uniformity, better blues &amp; purples</option>
           </select>
         </div>
-
         <div class="preview-wrap">
           <div class="prev-label">Preview — After Noise Removal</div>
           <div class="canvas-bg"><canvas class="prev" id="prev3"></canvas></div>
@@ -364,11 +374,13 @@ select.sel-styled option{background:var(--surface2)}
       </div>
     </div>
 
-    <div class="connector" id="conn3"></div>
-
     <!-- ── STEP 4 ── SCALE DOWN -->
     <div class="step-card" id="card4">
       <div class="step-hdr" id="hdr4">
+        <div class="reorder-btns" onclick="event.stopPropagation()">
+          <button class="reorder-btn" id="up4" onclick="moveStep('4','up')">▲</button>
+          <button class="reorder-btn" id="dn4" onclick="moveStep('4','down')">▼</button>
+        </div>
         <div class="step-num">4</div>
         <div class="step-meta">
           <div class="step-name">Scale Down</div>
@@ -398,14 +410,16 @@ select.sel-styled option{background:var(--surface2)}
 // STATE
 // ─────────────────────────────────────────────────────────────────────────────
 const S = {
-  origData: null,       // ImageData — full original
-  selData: null,        // ImageData — after step 1 selection
-  sprites: [],          // [{id,x,y,w,h,pixelCount}]
-  selSprite: 'full',    // 'full' or sprite.id
-  pixelSize: 8,         // detected or manual
-  denoised: null,       // ImageData — after step 3
-  final: null,          // ImageData — after step 4
+  origData: null,
+  selData: null,
+  sprites: [],
+  selSprite: 'full',
+  pixelSize: 8,
+  denoised: null,
+  final: null,
 };
+
+let stepOrder = ['1','2','3','4'];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UTILS
@@ -1052,161 +1066,145 @@ function setBadge(step,cls,txt){
 function setCardLive(step,live){
   const card=$(`card${step}`);
   card.classList.toggle('live',live);
-  if(step<4) $(`conn${step}`).classList.toggle('live',live);
+  const next=card.nextElementSibling;
+  if(next&&next.classList.contains('connector')) next.classList.toggle('live',live);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PIPELINE RUNNER
+// PIPELINE REORDERING
+// ─────────────────────────────────────────────────────────────────────────────
+function renderPipelineOrder(){
+  const container=$('pipelineSteps');
+  stepOrder.forEach((id,i)=>{
+    container.appendChild($(`card${id}`));
+    if(i<stepOrder.length-1){
+      const conn=document.createElement('div');
+      conn.className='connector';
+      container.appendChild(conn);
+    }
+  });
+  updateReorderBtns();
+}
+
+function updateReorderBtns(){
+  stepOrder.forEach((id,i)=>{
+    $(`up${id}`).disabled=i===0;
+    $(`dn${id}`).disabled=i===stepOrder.length-1;
+  });
+}
+
+function moveStep(id,dir){
+  const i=stepOrder.indexOf(id);
+  const j=dir==='up'?i-1:i+1;
+  if(j<0||j>=stepOrder.length) return;
+  [stepOrder[i],stepOrder[j]]=[stepOrder[j],stepOrder[i]];
+  renderPipelineOrder();
+  if(S.origData) runPipeline();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 let debounce=null;
 
-async function runPipeline(){
-  if(!S.origData) return;
-  $('dlBtn').style.display='none';
-
-  [1,2,3,4].forEach(n=>{ setBadge(n,'badge-wait','WAIT'); setCardLive(n,false); });
-
-  // ── STEP 1 ──────────────────────────────────────────────────────────────
-  setBadge(1,'badge-run','RUN');
-  await tick();
-  const s1on=$('tog1').checked;
-
-  if(s1on){
+async function runStep1(proc){
+  setBadge(1,'badge-run','RUN'); await tick();
+  const on=$('tog1').checked;
+  if(on){
     S.sprites=detectSprites(S.origData);
-    // reset selection to full if sprite no longer exists
     if(S.selSprite!=='full'&&!S.sprites.find(s=>s.id===S.selSprite)) S.selSprite='full';
     renderSpriteGrid(S.sprites);
   } else {
     S.sprites=[]; S.selSprite='full';
     $('spriteContainer').innerHTML='<span style="color:var(--muted);font-size:10px;font-style:italic">Step disabled — using full image.</span>';
   }
-
   applySelection();
   drawPrev($('prev1'),S.selData);
-  setBadge(1,s1on?'badge-done':'badge-skip',s1on?'DONE':'SKIP');
-  setCardLive(1,s1on);
-  await tick();
+  setBadge(1,on?'badge-done':'badge-skip',on?'DONE':'SKIP');
+  setCardLive(1,on); await tick();
+  return S.selData||S.origData;
+}
 
-  // ── STEP 2 ──────────────────────────────────────────────────────────────
-  setBadge(2,'badge-run','RUN');
-  await tick();
-  const inp=S.selData||S.origData;
-
+async function runStep2(proc){
+  setBadge(2,'badge-run','RUN'); await tick();
+  const src=proc||S.origData;
   if($('manualPS').checked){
     S.pixelSize=Math.max(1,parseInt($('psInput').value)||1);
     $('psInfo').textContent='Manual override active';
   } else {
-    S.pixelSize=detectPixelSize(inp);
+    S.pixelSize=detectPixelSize(src);
     $('psInfo').textContent='Auto-detected from run-length analysis';
   }
-
   $('psVal').textContent=String(S.pixelSize);
-  drawGridOverlay($('prev2'),inp,S.pixelSize);
+  drawGridOverlay($('prev2'),src,S.pixelSize);
+  $('inDims').textContent=`${src.width}×${src.height}`;
+  $('outDims').textContent=`${Math.floor(src.width/S.pixelSize)}×${Math.floor(src.height/S.pixelSize)}`;
+  setBadge(2,'badge-done','DONE'); setCardLive(2,true); await tick();
+  return proc;
+}
 
-  const outW=Math.floor(inp.width/S.pixelSize);
-  const outH=Math.floor(inp.height/S.pixelSize);
-  $('inDims').textContent=`${inp.width}×${inp.height}`;
-  $('outDims').textContent=`${outW}×${outH}`;
-
-  setBadge(2,'badge-done','DONE'); setCardLive(2,true);
-  await tick();
-
-  // ── STEP 3 ──────────────────────────────────────────────────────────────
-  setBadge(3,'badge-run','RUN');
-  await tick();
-  const s3on=$('tog3').checked;
-  let proc=inp;
-
-  if(s3on){
-    const t=parseInt($('noiseT').value);
-    const nbr=$('noiseNbr').checked;
-    const ap=$('noiseAP').checked;
-    const doConsolidate=$('consolidate').checked;
-    const maxC=Math.max(2,parseInt($('maxColors').value)||32);
-    const algo=$('quantAlgo').value;
-    const useOKLab=$('quantOKLab').checked;
-    const doPerceptual=$('togP').checked;
-    const perceptualMode=$('perceptualMode').value;
-
-    const cBefore=countColors(inp);
-    $('cBefore').textContent=cBefore;
-    $('noiseStats').style.display='flex';
-
+async function runStep3(proc){
+  setBadge(3,'badge-run','RUN'); await tick();
+  const on=$('tog3').checked;
+  let out=proc;
+  if(on){
+    const t=parseInt($('noiseT').value),nbr=$('noiseNbr').checked,ap=$('noiseAP').checked;
+    const doConsolidate=$('consolidate').checked,maxC=Math.max(2,parseInt($('maxColors').value)||32);
+    const algo=$('quantAlgo').value,useOKLab=$('quantOKLab').checked;
+    const doPerceptual=$('togP').checked,perceptualMode=$('perceptualMode').value;
+    const cBefore=countColors(proc);
+    $('cBefore').textContent=cBefore; $('noiseStats').style.display='flex';
     await tick();
-    let noised=removeNoise(inp,t,nbr,ap);
-    const cAfter=countColors(noised);
-    $('cAfter').textContent=cAfter;
-
+    let noised=removeNoise(proc,t,nbr,ap);
+    const cAfter=countColors(noised); $('cAfter').textContent=cAfter;
     await tick();
-    if(doConsolidate&&cAfter>maxC){
-      proc=quantize(noised,maxC,algo,useOKLab,'off');
-    } else {
-      proc=noised;
-    }
-
-    // Perceptual remap — independent of consolidation
+    out=doConsolidate&&cAfter>maxC?quantize(noised,maxC,algo,useOKLab,'off'):noised;
     if(doPerceptual){
-      const colorMap=getColorMap(proc);
-      const palette=[...colorMap.values()];
-      const lookup=perceptualMode==='oklab'
-        ?buildOKLabLookup(colorMap,palette)
-        :buildLABLookup(colorMap,palette);
-      proc=remapPixels(proc,lookup);
+      const colorMap=getColorMap(out),palette=[...colorMap.values()];
+      out=remapPixels(out,perceptualMode==='oklab'?buildOKLabLookup(colorMap,palette):buildLABLookup(colorMap,palette));
     }
-
-    S.denoised=proc;
-
-    const cFinal=countColors(proc);
+    S.denoised=out;
+    const cFinal=countColors(out);
     $('cFinal').textContent=cFinal;
-    const reduction=cBefore>0?Math.round((1-cFinal/cBefore)*100):0;
-    $('cReduce').textContent=reduction+'%';
-
-    drawPrev($('prev3'),proc);
-
-    // palette
-    const PAL_LIMIT=72;
-    const pal=getPalette(proc,PAL_LIMIT);
-    const pw=$('palette'); pw.innerHTML='';
-    for(const c of pal){
-      const sw=document.createElement('div');
-      sw.className='swatch'; sw.style.background=c; sw.title=c;
-      pw.appendChild(sw);
-    }
+    $('cReduce').textContent=(cBefore>0?Math.round((1-cFinal/cBefore)*100):0)+'%';
+    drawPrev($('prev3'),out);
+    const PAL_LIMIT=72,pal=getPalette(out,PAL_LIMIT),pw=$('palette');
+    pw.innerHTML='';
+    for(const c of pal){const sw=document.createElement('div');sw.className='swatch';sw.style.background=c;sw.title=c;pw.appendChild(sw);}
     const msg=$('paletteMsg');
-    if(cFinal>PAL_LIMIT){
-      msg.textContent=`Showing ${PAL_LIMIT} of ${cFinal} colors (most frequent first) — raise threshold or lower max colors to see the full palette`;
-      msg.style.display='block';
-    } else {
-      msg.style.display='none';
-    }
+    if(cFinal>PAL_LIMIT){msg.textContent=`Showing ${PAL_LIMIT} of ${cFinal} colors (most frequent first) — raise threshold or lower max colors to see the full palette`;msg.style.display='block';}
+    else msg.style.display='none';
     $('paletteWrap').style.display='block';
-
     setBadge(3,'badge-done','DONE'); setCardLive(3,true);
   } else {
     S.denoised=null;
-    $('noiseStats').style.display='none';
-    $('paletteWrap').style.display='none';
-    $('prev3').width=0;
+    $('noiseStats').style.display='none'; $('paletteWrap').style.display='none'; $('prev3').width=0;
     setBadge(3,'badge-skip','SKIP'); setCardLive(3,false);
   }
-  await tick();
+  await tick(); return out;
+}
 
-  // ── STEP 4 ──────────────────────────────────────────────────────────────
-  setBadge(4,'badge-run','RUN');
-  await tick();
-
+async function runStep4(proc){
+  setBadge(4,'badge-run','RUN'); await tick();
   S.final=scaleDown(proc,S.pixelSize);
-  const zoom=Math.max(1,Math.min(8,Math.floor(200/Math.max(S.final.width,S.final.height)))||4);
-  drawZoomed($('prev4'),S.final,Math.max(2,zoom));
-
+  const zoom=Math.max(2,Math.min(8,Math.floor(200/Math.max(S.final.width,S.final.height))||4));
+  drawZoomed($('prev4'),S.final,zoom);
+  $('inDims').textContent=`${proc.width}×${proc.height}`;
+  $('outDims').textContent=`${S.final.width}×${S.final.height}`;
   setBadge(4,'badge-done','DONE'); setCardLive(4,true);
+  idToCanvas(S.final).toBlob(blob=>{const dl=$('dlBtn');dl.href=URL.createObjectURL(blob);dl.style.display='inline-block';});
+  await tick(); return S.final;
+}
 
-  // download
-  idToCanvas(S.final).toBlob(blob=>{
-    const url=URL.createObjectURL(blob);
-    const dl=$('dlBtn');
-    dl.href=url; dl.style.display='inline-block';
-  });
+async function runPipeline(){
+  if(!S.origData) return;
+  $('dlBtn').style.display='none';
+  stepOrder.forEach(id=>{ setBadge(id,'badge-wait','WAIT'); setCardLive(id,false); });
+  let proc=S.origData;
+  for(const id of stepOrder){
+    if(id==='1') proc=await runStep1(proc);
+    else if(id==='2') proc=await runStep2(proc);
+    else if(id==='3') proc=await runStep3(proc);
+    else if(id==='4') proc=await runStep4(proc);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1245,6 +1243,9 @@ function loadFile(file){
 // ─────────────────────────────────────────────────────────────────────────────
 // EVENT HANDLERS
 // ─────────────────────────────────────────────────────────────────────────────
+// Initialise pipeline DOM order and button states
+renderPipelineOrder();
+
 const dz=$('dropZone');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
 dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
