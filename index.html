@@ -330,13 +330,14 @@ select.sel-styled option{background:var(--surface2)}
         </div>
         <div style="border-top:1px solid var(--border);margin:10px 0 10px"></div>
         <div class="srow">
-          <label class="chk-label">
-            <input type="checkbox" id="labPerceptual">
-            <span class="chk-box"></span>
-            <span><strong>Perceptual Matching (LAB)</strong> — remap pixels to palette using LAB distance instead of RGB</span>
-          </label>
+          <span class="slabel">Perceptual</span>
+          <select id="perceptualMode" class="sel-styled">
+            <option value="off" selected>Off — nearest color in RGB space</option>
+            <option value="lab">CIE LAB — perceptually uniform, industry standard</option>
+            <option value="oklab">OKLab — improved hue uniformity, better blues &amp; purples</option>
+          </select>
         </div>
-        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Runs after any algorithm as a final remap pass. LAB distance matches human perception — equal numeric distances in RGB look very unequal to the eye (blues appear to shift more than greens). Improves color accuracy especially for subtle hues.</p>
+        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Final remap pass — each pixel is assigned to its nearest palette color using the chosen color space distance. CIE LAB corrects RGB's perceptual non-uniformity. OKLab additionally fixes LAB's hue linearity issues in blues and purples, making it the more accurate modern choice.</p>
 
         <div class="preview-wrap">
           <div class="prev-label">Preview — After Noise Removal</div>
@@ -646,7 +647,7 @@ function removeNoise(id,threshold,neighbored,affectPrev){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COLOR SPACE — sRGB ↔ LAB
+// COLOR SPACE — sRGB ↔ CIE LAB / OKLab
 // ─────────────────────────────────────────────────────────────────────────────
 function srgbToLinear(c){ c/=255; return c<=.04045?c/12.92:((c+.055)/1.055)**2.4; }
 
@@ -658,6 +659,23 @@ function rgbToLab(r,g,b){
   const f=t=>t>.008856?t**(1/3):7.787*t+16/116;
   x=f(x); y=f(y); z=f(z);
   return [116*y-16, 500*(x-y), 200*(y-z)];
+}
+
+function rgbToOklab(r,g,b){
+  // sRGB → linear
+  const lr=srgbToLinear(r),lg=srgbToLinear(g),lb=srgbToLinear(b);
+  // linear RGB → LMS (Oklab M1)
+  const l=lr*.4122214708+lg*.5363325363+lb*.0514459929;
+  const m=lr*.2119034982+lg*.6806995451+lb*.1073969566;
+  const s=lr*.0883024619+lg*.2817188376+lb*.6299787005;
+  // LMS → LMS' (cube root)
+  const l_=Math.cbrt(l), m_=Math.cbrt(m), s_=Math.cbrt(s);
+  // LMS' → OKLab (Oklab M2)
+  return [
+    l_*.2104542553+m_*.7936177850-s_*.0040720468,
+    l_*1.9779984951-m_*2.4285922050+s_*.4505937099,
+    l_*.0259040371+m_*.7827717662-s_*.8086757660
+  ];
 }
 
 function labDist(L1,a1,b1,L2,a2,b2){
@@ -702,6 +720,21 @@ function buildLABLookup(colorMap, palette){
     let minD=Infinity,best=palLab[0];
     for(const p of palLab){
       const d=labDist(L,a,b,...p.lab);
+      if(d<minD){minD=d;best=p;}
+    }
+    lookup.set(k,best);
+  }
+  return lookup;
+}
+
+function buildOKLabLookup(colorMap, palette){
+  const palOk=palette.map(p=>({...p,ok:rgbToOklab(p.r,p.g,p.b)}));
+  const lookup=new Map();
+  for(const [k,c] of colorMap){
+    const [L,a,b]=rgbToOklab(c.r,c.g,c.b);
+    let minD=Infinity,best=palOk[0];
+    for(const p of palOk){
+      const d=labDist(L,a,b,...p.ok);
       if(d<minD){minD=d;best=p;}
     }
     lookup.set(k,best);
@@ -867,9 +900,10 @@ function quantizeOctree(colors, k){
 // ─────────────────────────────────────────────────────────────────────────────
 // QUANTIZE DISPATCHER
 // ─────────────────────────────────────────────────────────────────────────────
-function quantize(id, maxColors, algo, useLab){
+function quantize(id, maxColors, algo, perceptualMode){
   const colorMap=getColorMap(id);
   const needsQuant=colorMap.size>maxColors;
+  const usePerceptual=perceptualMode!=='off';
 
   let palette;
   if(needsQuant){
@@ -884,8 +918,11 @@ function quantize(id, maxColors, algo, useLab){
     palette=[...colorMap.values()];
   }
 
-  if(!needsQuant&&!useLab) return cloneID(id);
-  const lookup=useLab?buildLABLookup(colorMap,palette):buildRGBLookup(colorMap,palette);
+  if(!needsQuant&&!usePerceptual) return cloneID(id);
+  let lookup;
+  if(perceptualMode==='oklab')    lookup=buildOKLabLookup(colorMap,palette);
+  else if(perceptualMode==='lab') lookup=buildLABLookup(colorMap,palette);
+  else                            lookup=buildRGBLookup(colorMap,palette);
   return remapPixels(id,lookup);
 }
 
@@ -1036,7 +1073,7 @@ async function runPipeline(){
     const doConsolidate=$('consolidate').checked;
     const maxC=Math.max(2,parseInt($('maxColors').value)||32);
     const algo=$('quantAlgo').value;
-    const useLab=$('labPerceptual').checked;
+    const perceptualMode=$('perceptualMode').value;
 
     const cBefore=countColors(inp);
     $('cBefore').textContent=cBefore;
@@ -1048,8 +1085,8 @@ async function runPipeline(){
     $('cAfter').textContent=cAfter;
 
     await tick();
-    if(doConsolidate&&(cAfter>maxC||useLab)){
-      proc=quantize(noised,maxC,algo,useLab);
+    if(doConsolidate&&(cAfter>maxC||perceptualMode!=='off')){
+      proc=quantize(noised,maxC,algo,perceptualMode);
     } else {
       proc=noised;
     }
@@ -1162,10 +1199,11 @@ $('noiseT').addEventListener('input',function(){
   $('noiseTVal').textContent=this.value;
   clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },700);
 });
-['noiseNbr','noiseAP','consolidate','labPerceptual'].forEach(id=>{
+['noiseNbr','noiseAP','consolidate'].forEach(id=>{
   $(id).addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 });
 $('quantAlgo').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+$('perceptualMode').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 $('maxColors').addEventListener('change',()=>{ clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },400); });
 
 // Show/hide consolidate sub-options
