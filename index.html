@@ -264,14 +264,14 @@ select.sel-styled option{background:var(--surface2)}
             <div class="ps-info" id="psInfo">Auto-detected from run-length analysis</div>
           </div>
         </div>
-        <div class="srow adv">
+        <div class="srow">
           <label class="chk-label">
             <input type="checkbox" id="manualPS">
             <span class="chk-box"></span>
             Manual Override
           </label>
         </div>
-        <div class="srow adv" id="manualRow" style="display:none">
+        <div class="srow" id="manualRow" style="display:none">
           <span class="slabel">Pixel Size</span>
           <input type="number" id="psInput" min="1" max="128" value="8">
           <span style="font-size:10px;color:var(--muted)">px</span>
@@ -427,6 +427,7 @@ const S = {
   sprites: [],
   selSprite: 'full',
   pixelSize: 8,
+  pixelOffset: {ox:0,oy:0},
   denoised: null,
   final: null,
 };
@@ -593,17 +594,19 @@ function applySelection(){
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 2 — PIXEL SIZE DETECTION
-// Grid alignment scoring: for each candidate P and every possible grid offset,
-// measure the ratio of edge strength AT pixel boundaries vs WITHIN blocks.
-// The true P wins because pixel boundaries consistently have stronger color
-// transitions even in noisy images. Borders are excluded to avoid partial pixels.
+// DFT periodogram on the averaged edge signal. The edge signal has periodic
+// spikes at every pixel boundary (every P positions). The DFT power at
+// frequency 1/P is maximum at the true pixel size because all boundary
+// contributions add coherently. Crucially, multiples of P (2P, 3P...) have
+// ZERO power due to constructive/destructive cancellation — so the algorithm
+// always finds the fundamental P, not a larger harmonic.
 // ─────────────────────────────────────────────────────────────────────────────
 function detectPixelSize(id){
   const {data,width,height}=id;
   const rowStep=Math.max(1,Math.floor(height/60));
   const colStep=Math.max(1,Math.floor(width/60));
 
-  // Build averaged horizontal edge signal (color distance between horizontally adjacent pixels)
+  // Build averaged horizontal edge signal
   const hEdge=new Float32Array(width);
   let rn=0;
   for(let y=0;y<height;y+=rowStep){
@@ -635,38 +638,51 @@ function detectPixelSize(id){
   }
   if(cn>0) for(let y=0;y<height;y++) vEdge[y]/=cn;
 
-  // For each candidate P: try all grid offsets, score as boundary/interior edge ratio
-  // Skip first and last P positions to avoid partial pixels at borders
-  function scoreEdge(edge,len){
-    const maxP=Math.min(64,Math.floor(len/4));
-    const scores=new Float32Array(maxP+1);
-    for(let P=2;P<=maxP;P++){
-      let best=0;
-      for(let off=0;off<P;off++){
-        let bs=0,bc=0,is=0,ic=0;
-        for(let i=P;i<len-P;i++){
-          if((i-off)%P===0){ bs+=edge[i]; bc++; }
-          else{ is+=edge[i]; ic++; }
-        }
-        if(!bc||!ic) continue;
-        const s=(bs/bc)/(is/ic+1e-6);
-        if(s>best) best=s;
+  // DFT periodogram: power at frequency 1/P for each candidate pixel size.
+  // Subtract mean (remove DC). Require at least 4 full periods for reliability.
+  function periodogram(edge){
+    const N=edge.length;
+    let mean=0;
+    for(let i=0;i<N;i++) mean+=edge[i];
+    mean/=N;
+    const scores=new Float32Array(65);
+    for(let P=2;P<=64&&P*4<=N;P++){
+      const f=2*Math.PI/P;
+      let a=0,b=0;
+      for(let i=0;i<N;i++){
+        const v=edge[i]-mean;
+        a+=v*Math.cos(f*i);
+        b+=v*Math.sin(f*i);
       }
-      scores[P]=best;
+      scores[P]=(a*a+b*b)/(N*N);
     }
     return scores;
   }
 
-  const hs=scoreEdge(hEdge,width);
-  const vs=scoreEdge(vEdge,height);
-  const maxP=Math.min(hs.length,vs.length)-1;
+  const hs=periodogram(hEdge);
+  const vs=periodogram(vEdge);
 
   let bestP=2,bestS=-1;
-  for(let P=2;P<=maxP;P++){
+  for(let P=2;P<=64;P++){
     const s=hs[P]+vs[P];
     if(s>bestS){bestS=s;bestP=P;}
   }
-  return bestP;
+
+  // Find best grid offset for each axis: the offset that maximises total
+  // edge strength at boundary positions (accounts for partial pixels at edges)
+  function bestOffset(edge,P){
+    let bestOff=0,bestSum=-1;
+    for(let off=0;off<P;off++){
+      let sum=0;
+      for(let i=off;i<edge.length;i+=P) sum+=edge[i];
+      if(sum>bestSum){bestSum=sum;bestOff=off;}
+    }
+    return bestOff;
+  }
+
+  const ox=bestOffset(hEdge,bestP);
+  const oy=bestOffset(vEdge,bestP);
+  return {P:bestP,ox,oy};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1040,10 +1056,10 @@ function quantize(id, maxColors, algo, useOKLab, perceptualMode){
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 4 — SCALE DOWN
 // ─────────────────────────────────────────────────────────────────────────────
-function scaleDown(id,P){
+function scaleDown(id,P,ox=0,oy=0){
   const {data,width,height}=id;
-  const outW=Math.max(1,Math.floor(width/P));
-  const outH=Math.max(1,Math.floor(height/P));
+  const outW=Math.max(1,Math.floor((width-ox)/P));
+  const outH=Math.max(1,Math.floor((height-oy)/P));
   const outD=new Uint8ClampedArray(outW*outH*4);
 
   for(let by=0;by<outH;by++){
@@ -1053,7 +1069,7 @@ function scaleDown(id,P){
 
       for(let dy=0;dy<P;dy++){
         for(let dx=0;dx<P;dx++){
-          const sx=bx*P+dx, sy=by*P+dy;
+          const sx=ox+bx*P+dx, sy=oy+by*P+dy;
           if(sx>=width||sy>=height) continue;
           const i=(sy*width+sx)*4;
           if(data[i+3]<128) continue;
@@ -1083,7 +1099,7 @@ function drawPrev(canvas,id){
   canvas.getContext('2d').putImageData(id,0,0);
 }
 
-function drawGridOverlay(canvas,id,P){
+function drawGridOverlay(canvas,id,P,ox=0,oy=0){
   if(!id){canvas.width=0;return;}
   const {width,height}=id;
   canvas.width=width; canvas.height=height;
@@ -1091,8 +1107,8 @@ function drawGridOverlay(canvas,id,P){
   ctx.putImageData(id,0,0);
   ctx.strokeStyle='rgba(255,220,0,.5)';
   ctx.lineWidth=.5;
-  for(let x=0;x<=width;x+=P){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();}
-  for(let y=0;y<=height;y+=P){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();}
+  for(let x=ox%P;x<=width;x+=P){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,height);ctx.stroke();}
+  for(let y=oy%P;y<=height;y+=P){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(width,y);ctx.stroke();}
 }
 
 function drawZoomed(canvas,id,zoom){
@@ -1174,13 +1190,16 @@ async function runStep2(proc){
   const src=proc||S.origData;
   if($('manualPS').checked){
     S.pixelSize=Math.max(1,parseInt($('psInput').value)||1);
+    S.pixelOffset={ox:0,oy:0};
     $('psInfo').textContent='Manual override active';
   } else {
-    S.pixelSize=detectPixelSize(src);
-    $('psInfo').textContent='Auto-detected from run-length analysis';
+    const det=detectPixelSize(src);
+    S.pixelSize=det.P;
+    S.pixelOffset={ox:det.ox,oy:det.oy};
+    $('psInfo').textContent=`Auto-detected — offset ${det.ox}×${det.oy}px`;
   }
   $('psVal').textContent=String(S.pixelSize);
-  drawGridOverlay($('prev2'),src,S.pixelSize);
+  drawGridOverlay($('prev2'),src,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy);
   $('inDims').textContent=`${src.width}×${src.height}`;
   $('outDims').textContent=`${Math.floor(src.width/S.pixelSize)}×${Math.floor(src.height/S.pixelSize)}`;
   setBadge(2,'badge-done','DONE'); setCardLive(2,true); await tick();
@@ -1230,7 +1249,7 @@ async function runStep3(proc){
 
 async function runStep4(proc){
   setBadge(4,'badge-run','RUN'); await tick();
-  S.final=scaleDown(proc,S.pixelSize);
+  S.final=scaleDown(proc,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy);
   const zoom=Math.max(2,Math.min(8,Math.floor(200/Math.max(S.final.width,S.final.height))||4));
   drawZoomed($('prev4'),S.final,zoom);
   $('inDims').textContent=`${proc.width}×${proc.height}`;
