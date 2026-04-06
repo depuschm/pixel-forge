@@ -594,95 +594,99 @@ function applySelection(){
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 2 — PIXEL SIZE DETECTION
-// DFT periodogram on the averaged edge signal. The edge signal has periodic
-// spikes at every pixel boundary (every P positions). The DFT power at
-// frequency 1/P is maximum at the true pixel size because all boundary
-// contributions add coherently. Crucially, multiples of P (2P, 3P...) have
-// ZERO power due to constructive/destructive cancellation — so the algorithm
-// always finds the fundamental P, not a larger harmonic.
+// Block uniformity scoring (F-ratio): for each candidate P and every offset,
+// split the averaged column/row profile into blocks of P. Score = between-block
+// contrast / (within-block variance + 1). At the true P, blocks are internally
+// uniform (low within) and differ from neighbours (high between). Harmonics
+// (2P, 3P) have high within-variance because each block spans multiple logical
+// pixels. Sub-multiples (P/2) have low between-contrast. The F-ratio naturally
+// peaks at the true fundamental P.
+// Averaging over many rows/columns reduces noise to a clean stepped signal.
+// Only full blocks are scored — partial border pixels are excluded.
 // ─────────────────────────────────────────────────────────────────────────────
 function detectPixelSize(id){
   const {data,width,height}=id;
-  const rowStep=Math.max(1,Math.floor(height/60));
-  const colStep=Math.max(1,Math.floor(width/60));
+  const rowStep=Math.max(1,Math.floor(height/80));
+  const colStep=Math.max(1,Math.floor(width/80));
 
-  // Build averaged horizontal edge signal
-  const hEdge=new Float32Array(width);
+  // Build averaged column luminance profile (average R+G+B across sampled rows)
+  const colAvg=new Float32Array(width);
   let rn=0;
   for(let y=0;y<height;y+=rowStep){
     let ok=false;
-    for(let x=0;x<width-1;x++){
+    for(let x=0;x<width;x++){
       const a=(y*width+x)*4;
-      if(data[a+3]<128||data[a+7]<128) continue;
+      if(data[a+3]<128) continue;
       ok=true;
-      const dr=data[a]-data[a+4],dg=data[a+1]-data[a+5],db=data[a+2]-data[a+6];
-      hEdge[x]+=Math.sqrt(dr*dr+dg*dg+db*db);
+      colAvg[x]+=(data[a]+data[a+1]+data[a+2])/3;
     }
     if(ok) rn++;
   }
-  if(rn>0) for(let x=0;x<width;x++) hEdge[x]/=rn;
+  if(rn>0) for(let x=0;x<width;x++) colAvg[x]/=rn;
 
-  // Build averaged vertical edge signal
-  const vEdge=new Float32Array(height);
+  // Build averaged row luminance profile
+  const rowAvg=new Float32Array(height);
   let cn=0;
   for(let x=0;x<width;x+=colStep){
     let ok=false;
-    for(let y=0;y<height-1;y++){
-      const a=(y*width+x)*4,b=a+width*4;
-      if(data[a+3]<128||data[b+3]<128) continue;
+    for(let y=0;y<height;y++){
+      const a=(y*width+x)*4;
+      if(data[a+3]<128) continue;
       ok=true;
-      const dr=data[a]-data[b],dg=data[a+1]-data[b+1],db=data[a+2]-data[b+2];
-      vEdge[y]+=Math.sqrt(dr*dr+dg*dg+db*db);
+      rowAvg[y]+=(data[a]+data[a+1]+data[a+2])/3;
     }
     if(ok) cn++;
   }
-  if(cn>0) for(let y=0;y<height;y++) vEdge[y]/=cn;
+  if(cn>0) for(let y=0;y<height;y++) rowAvg[y]/=cn;
 
-  // DFT periodogram: power at frequency 1/P for each candidate pixel size.
-  // Subtract mean (remove DC). Require at least 4 full periods for reliability.
-  function periodogram(edge){
-    const N=edge.length;
-    let mean=0;
-    for(let i=0;i<N;i++) mean+=edge[i];
-    mean/=N;
-    const scores=new Float32Array(65);
-    for(let P=2;P<=64&&P*4<=N;P++){
-      const f=2*Math.PI/P;
-      let a=0,b=0;
-      for(let i=0;i<N;i++){
-        const v=edge[i]-mean;
-        a+=v*Math.cos(f*i);
-        b+=v*Math.sin(f*i);
-      }
-      scores[P]=(a*a+b*b)/(N*N);
-    }
-    return scores;
-  }
-
-  const hs=periodogram(hEdge);
-  const vs=periodogram(vEdge);
-
-  let bestP=2,bestS=-1;
-  for(let P=2;P<=64;P++){
-    const s=hs[P]+vs[P];
-    if(s>bestS){bestS=s;bestP=P;}
-  }
-
-  // Find best grid offset for each axis: the offset that maximises total
-  // edge strength at boundary positions (accounts for partial pixels at edges)
-  function bestOffset(edge,P){
-    let bestOff=0,bestSum=-1;
+  // F-ratio scorer: for given profile, candidate P, offset off
+  // returns {score, bestOff} — only full blocks counted
+  function scoreProfile(profile, P){
+    const N=profile.length;
+    let bestScore=-1, bestOff=0;
     for(let off=0;off<P;off++){
-      let sum=0;
-      for(let i=off;i<edge.length;i+=P) sum+=edge[i];
-      if(sum>bestSum){bestSum=sum;bestOff=off;}
+      // Collect block means for full blocks only
+      const means=[];
+      for(let start=off;start+P<=N;start+=P){
+        let sum=0;
+        for(let i=0;i<P;i++) sum+=profile[start+i];
+        means.push(sum/P);
+      }
+      if(means.length<3) continue;
+
+      // Between-block variance (contrast between adjacent block means)
+      let between=0;
+      for(let i=1;i<means.length;i++) between+=(means[i]-means[i-1])**2;
+      between/=(means.length-1);
+
+      // Within-block variance (averaged across all blocks)
+      let within=0;
+      for(let i=0,start=off;start+P<=N;start+=P,i++){
+        const m=means[i];
+        for(let j=0;j<P;j++) within+=(profile[start+j]-m)**2;
+      }
+      within/=(means.length*P);
+
+      const score=between/(within+1);
+      if(score>bestScore){bestScore=score;bestOff=off;}
     }
-    return bestOff;
+    return {score:bestScore,off:bestOff};
   }
 
-  const ox=bestOffset(hEdge,bestP);
-  const oy=bestOffset(vEdge,bestP);
-  return {P:bestP,ox,oy};
+  // Score all candidate P values, require at least 4 full blocks
+  let bestP=2,bestScore=-1,bestOx=0,bestOy=0;
+  for(let P=2;P<=64;P++){
+    if(Math.floor(width/P)<4||Math.floor(height/P)<4) continue;
+    const h=scoreProfile(colAvg,P);
+    const v=scoreProfile(rowAvg,P);
+    const s=h.score+v.score;
+    if(s>bestScore){
+      bestScore=s; bestP=P;
+      bestOx=h.off; bestOy=v.off;
+    }
+  }
+
+  return {P:bestP, ox:bestOx, oy:bestOy};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
