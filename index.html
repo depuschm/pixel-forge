@@ -677,36 +677,19 @@ function detectPixelSize(id){
   // Normalize by sqrt(P) to prevent large P from winning via accumulated
   // low within-variance: at large P each block averages many game-pixels,
   // making within trivially small regardless of the true pixel size.
-  const allScores={}; // raw (unnormalized) scores keyed by P, for sub-divisor pass
-  const allOx={}, allOy={};
   let bestP=2,bestScore=-1,bestOx=0,bestOy=0;
   for(let P=2;P<=64;P++){
     if(Math.floor(width/P)<4||Math.floor(height/P)<4) continue;
     const h=scoreProfile(colAvg,P);
     const v=scoreProfile(rowAvg,P);
-    const raw=h.score+v.score;
-    allScores[P]=raw; allOx[P]=h.off; allOy[P]=v.off;
-    // Normalize: divide by sqrt(P) so smaller P is preferred for equal quality
-    const s=raw/Math.sqrt(P);
+    // Normalize by sqrt(P): prevents large P winning via trivially low
+    // within-variance from over-averaging; biases toward smaller sizes
+    const s=(h.score+v.score)/Math.sqrt(P);
     if(s>bestScore){
       bestScore=s; bestP=P;
       bestOx=h.off; bestOy=v.off;
     }
   }
-
-  // Sub-divisor reduction pass: if a proper divisor d of bestP also has a
-  // normalized score >= 55 % of bestScore, prefer d (catches harmonics where
-  // e.g. P=20 wins but the true pixel size is 10).
-  function reduceToDivisor(P){
-    for(let d=2;d<P;d++){
-      if(P%d!==0||!(d in allScores)) continue;
-      const ds=allScores[d]/Math.sqrt(d);
-      if(ds>=0.55*bestScore) return reduceToDivisor(d);
-    }
-    return P;
-  }
-  const reducedP=reduceToDivisor(bestP);
-  if(reducedP!==bestP) bestP=reducedP;
 
   // ── Dedicated offset refinement ──────────────────────────────────────────
   // Now that P is confirmed, find the top-left offset independently by
