@@ -1380,6 +1380,11 @@ $('tog1').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 // Step 2 manual override
 $('manualPS').addEventListener('change',function(){
   $('manualRow').style.display=this.checked?'flex':'none';
+  if(!S.origData) return;
+  const newP=this.checked
+    ? Math.max(1,parseInt($('psInput').value)||1)
+    : detectPixelSize(S.selData||S.origData).P;
+  if(newP!==S.pixelSize) runPipeline();
 });
 $('psInput').addEventListener('change',()=>{
   if($('manualPS').checked&&S.origData){ clearTimeout(debounce); debounce=setTimeout(runPipeline,400); }
