@@ -677,8 +677,8 @@ function detectPixelSize(id){
   // Normalize by sqrt(P) to prevent large P from winning via accumulated
   // low within-variance: at large P each block averages many game-pixels,
   // making within trivially small regardless of the true pixel size.
-  let bestP=2,bestScore=-1,bestOx=0,bestOy=0;
-  for(let P=2;P<=64;P++){
+  let bestP=1,bestScore=-1,bestOx=0,bestOy=0;
+  for(let P=1;P<=64;P++){
     if(Math.floor(width/P)<4||Math.floor(height/P)<4) continue;
     const h=scoreProfile(colAvg,P);
     const v=scoreProfile(rowAvg,P);
