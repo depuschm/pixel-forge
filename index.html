@@ -593,93 +593,149 @@ function applySelection(){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STEP 2 — PIXEL SIZE DETECTION  (autocorrelation of edge-density map)
-//
-// 1. Build colDens[x] / rowDens[y]: how many sampled scan-lines have a strong
-//    colour jump at that pixel coordinate.  For N×-scaled pixel art this is a
-//    sparse periodic spike train with period N (spikes at every Nth column).
-//
-// 2. Compute the autocorrelation of that spike train.
-//    AC[lag] peaks strongly whenever lag is a multiple of the true period P
-//    and is near-zero (or negative) for non-multiples.
-//    Crucially, AC[P] > AC[2P] > AC[3P] because each longer lag captures
-//    fewer aligned spike pairs → argmax(AC) = P directly.
-//
-// Why earlier approaches failed:
-//    • Luminance-profile AC: slow-varying steps, not spikes → broad AC lobes,
-//      easy to mistake harmonics for the fundamental.
-//    • GCD / mode on run-lengths: within-pixel noise floods short bins → P=2.
-//    • Grid average score: large P has fewer lines → artificially high average.
+// STEP 2 — PIXEL SIZE DETECTION
+// Block uniformity scoring (F-ratio): for each candidate P and every offset,
+// split the averaged column/row profile into blocks of P. Score = between-block
+// contrast / (within-block variance + 1). At the true P, blocks are internally
+// uniform (low within) and differ from neighbours (high between). Harmonics
+// (2P, 3P) have high within-variance because each block spans multiple logical
+// pixels. Sub-multiples (P/2) have low between-contrast. The F-ratio naturally
+// peaks at the true fundamental P.
+// Averaging over many rows/columns reduces noise to a clean stepped signal.
+// Only full blocks are scored — partial border pixels are excluded.
 // ─────────────────────────────────────────────────────────────────────────────
 function detectPixelSize(id){
   const {data,width,height}=id;
-  const MAX_P=48;
-  const rowSample=Math.max(1,Math.floor(height/150));
-  const colSample=Math.max(1,Math.floor(width/150));
+  const rowStep=Math.max(1,Math.floor(height/80));
+  const colStep=Math.max(1,Math.floor(width/80));
 
-  function buildDensity(thresh){
-    const colDens=new Float32Array(width);
-    const rowDens=new Float32Array(height);
-    for(let y=0;y<height;y+=rowSample){
-      for(let x=0;x<width-1;x++){
-        const i=(y*width+x)*4,j=i+4;
-        if(data[i+3]<128||data[j+3]<128) continue;
-        const d=(Math.abs(data[i]-data[j])+Math.abs(data[i+1]-data[j+1])+Math.abs(data[i+2]-data[j+2]))/3;
-        if(d>thresh) colDens[x+1]++;
-      }
+  // Build averaged column luminance profile (average R+G+B across sampled rows)
+  const colAvg=new Float32Array(width);
+  let rn=0;
+  for(let y=0;y<height;y+=rowStep){
+    let ok=false;
+    for(let x=0;x<width;x++){
+      const a=(y*width+x)*4;
+      if(data[a+3]<128) continue;
+      ok=true;
+      colAvg[x]+=(data[a]+data[a+1]+data[a+2])/3;
     }
-    for(let x=0;x<width;x+=colSample){
-      for(let y=0;y<height-1;y++){
-        const i=(y*width+x)*4,j=i+width*4;
-        if(data[i+3]<128||data[j+3]<128) continue;
-        const d=(Math.abs(data[i]-data[j])+Math.abs(data[i+1]-data[j+1])+Math.abs(data[i+2]-data[j+2]))/3;
-        if(d>thresh) rowDens[y+1]++;
-      }
-    }
-    return {colDens,rowDens};
+    if(ok) rn++;
   }
+  if(rn>0) for(let x=0;x<width;x++) colAvg[x]/=rn;
 
-  // Autocorrelation of a 1-D density array → returns best period in [2, maxP]
-  // For a sparse periodic spike train, AC[true_period] is the global maximum.
-  function acPeriod(dens, maxP){
-    const N=dens.length;
-    // Mean-centre
-    let mean=0; for(let i=0;i<N;i++) mean+=dens[i]; mean/=N;
-    const s=new Float32Array(N);
-    for(let i=0;i<N;i++) s[i]=dens[i]-mean;
-
-    // AC at lags 2..maxP
-    let bestLag=2, bestAC=-Infinity;
-    for(let lag=2;lag<=maxP;lag++){
-      const len=N-lag; if(len<8) break;
-      let sum=0;
-      for(let i=0;i<len;i++) sum+=s[i]*s[i+lag];
-      const ac=sum/len;
-      if(ac>bestAC){bestAC=ac;bestLag=lag;}
+  // Build averaged row luminance profile
+  const rowAvg=new Float32Array(height);
+  let cn=0;
+  for(let x=0;x<width;x+=colStep){
+    let ok=false;
+    for(let y=0;y<height;y++){
+      const a=(y*width+x)*4;
+      if(data[a+3]<128) continue;
+      ok=true;
+      rowAvg[y]+=(data[a]+data[a+1]+data[a+2])/3;
     }
-    return bestLag;
+    if(ok) cn++;
   }
+  if(cn>0) for(let y=0;y<height;y++) rowAvg[y]/=cn;
 
-  // Find grid phase offset: which offset 0…P-1 maximises mean density at grid lines
-  function bestPhase(dens, length, P){
-    let bestAvg=-1, bestOff=0;
+  // F-ratio scorer: for given profile, candidate P, offset off
+  // returns {score, bestOff} — only full blocks counted
+  function scoreProfile(profile, P){
+    const N=profile.length;
+    let bestScore=-1, bestOff=0;
     for(let off=0;off<P;off++){
-      let sum=0,cnt=0;
-      for(let pos=off;pos<length;pos+=P){sum+=dens[pos];cnt++;}
-      if(cnt>0){const avg=sum/cnt; if(avg>bestAvg){bestAvg=avg;bestOff=off;}}
+      // Collect block means for full blocks only
+      const means=[];
+      for(let start=off;start+P<=N;start+=P){
+        let sum=0;
+        for(let i=0;i<P;i++) sum+=profile[start+i];
+        means.push(sum/P);
+      }
+      if(means.length<3) continue;
+
+      // Between-block variance (contrast between adjacent block means)
+      let between=0;
+      for(let i=1;i<means.length;i++) between+=(means[i]-means[i-1])**2;
+      between/=(means.length-1);
+
+      // Within-block variance (averaged across all blocks)
+      let within=0;
+      for(let i=0,start=off;start+P<=N;start+=P,i++){
+        const m=means[i];
+        for(let j=0;j<P;j++) within+=(profile[start+j]-m)**2;
+      }
+      within/=(means.length*P);
+
+      const score=between/(within+1);
+      if(score>bestScore){bestScore=score;bestOff=off;}
+    }
+    return {score:bestScore,off:bestOff};
+  }
+
+  // Score all candidate P values, require at least 4 full blocks.
+  // Normalize by sqrt(P) to prevent large P from winning via accumulated
+  // low within-variance: at large P each block averages many game-pixels,
+  // making within trivially small regardless of the true pixel size.
+  const allScores={}; // raw (unnormalized) scores keyed by P, for sub-divisor pass
+  const allOx={}, allOy={};
+  let bestP=2,bestScore=-1,bestOx=0,bestOy=0;
+  for(let P=2;P<=64;P++){
+    if(Math.floor(width/P)<4||Math.floor(height/P)<4) continue;
+    const h=scoreProfile(colAvg,P);
+    const v=scoreProfile(rowAvg,P);
+    const raw=h.score+v.score;
+    allScores[P]=raw; allOx[P]=h.off; allOy[P]=v.off;
+    // Normalize: divide by sqrt(P) so smaller P is preferred for equal quality
+    const s=raw/Math.sqrt(P);
+    if(s>bestScore){
+      bestScore=s; bestP=P;
+      bestOx=h.off; bestOy=v.off;
+    }
+  }
+
+  // Sub-divisor reduction pass: if a proper divisor d of bestP also has a
+  // normalized score >= 55 % of bestScore, prefer d (catches harmonics where
+  // e.g. P=20 wins but the true pixel size is 10).
+  function reduceToDivisor(P){
+    for(let d=2;d<P;d++){
+      if(P%d!==0||!(d in allScores)) continue;
+      const ds=allScores[d]/Math.sqrt(d);
+      if(ds>=0.55*bestScore) return reduceToDivisor(d);
+    }
+    return P;
+  }
+  const reducedP=reduceToDivisor(bestP);
+  if(reducedP!==bestP) bestP=reducedP;
+
+  // ── Dedicated offset refinement ──────────────────────────────────────────
+  // Now that P is confirmed, find the top-left offset independently by
+  // minimising average within-block variance for each axis. This is a clean
+  // phase-detection pass decoupled from P selection and correctly handles
+  // cases where the remainder is split between top-left and bottom-right.
+  function findOffset(profile, P){
+    const N=profile.length;
+    let bestOff=0, bestWithin=Infinity;
+    for(let off=0;off<P;off++){
+      let totalW=0, nBlocks=0;
+      for(let start=off;start+P<=N;start+=P){
+        let sum=0;
+        for(let i=0;i<P;i++) sum+=profile[start+i];
+        const mean=sum/P;
+        let w=0;
+        for(let i=0;i<P;i++) w+=(profile[start+i]-mean)**2;
+        totalW+=w/P; nBlocks++;
+      }
+      if(nBlocks===0) continue;
+      const avg=totalW/nBlocks;
+      if(avg<bestWithin){ bestWithin=avg; bestOff=off; }
     }
     return bestOff;
   }
+  bestOx=findOffset(colAvg, bestP);
+  bestOy=findOffset(rowAvg, bestP);
 
-  // Use low threshold for clean PNG; fallback keeps it working for screenshots
-  const {colDens,rowDens}=buildDensity(8);
-
-  const Px=acPeriod(colDens,MAX_P);
-  const Py=acPeriod(rowDens,MAX_P);
-  // If both axes agree within ±1 use their average, else take the smaller
-  const P=Math.abs(Px-Py)<=1?Math.round((Px+Py)/2):Math.min(Px,Py);
-
-  return {P, ox:bestPhase(colDens,width,P), oy:bestPhase(rowDens,height,P)};
+  return {P:bestP, ox:bestOx, oy:bestOy};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
