@@ -276,6 +276,7 @@ select.sel-styled option{background:var(--surface2)}
           <input type="number" id="psInput" min="1" max="128" value="8">
           <span style="font-size:10px;color:var(--muted)">px</span>
         </div>
+        <p class="info-text" style="margin-top:4px">⚠ Detection is heuristic and may be off — especially on blurred or non-pixel-perfect images. Use Manual Override if the grid overlay looks misaligned.</p>
         <div class="preview-wrap">
           <div class="prev-label">Preview — Pixel Grid Overlay</div>
           <div class="canvas-bg"><canvas class="prev" id="prev2"></canvas></div>
@@ -579,6 +580,7 @@ function makeSpriteItem(spId,label,id,x,y,w,h,selected){
     S.selSprite=spId;
     applySelection();
     drawPrev($('prev1'),S.selData);
+    if(S.origData) runPipeline();
   });
   return item;
 }
