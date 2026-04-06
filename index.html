@@ -429,6 +429,7 @@ const S = {
   selSprite: 'full',
   pixelSize: 8,
   pixelOffset: {ox:0,oy:0},
+  gridPan: null,   // {x,y} center in source coords; null = use image center
   denoised: null,
   final: null,
 };
@@ -586,6 +587,7 @@ function makeSpriteItem(spId,label,id,x,y,w,h,selected){
 }
 
 function applySelection(){
+  S.gridPan=null;
   if(S.selSprite==='full'||!$('tog1').checked){
     S.selData=S.origData;
   } else {
@@ -1137,7 +1139,7 @@ function drawPrev(canvas,id){
   canvas.getContext('2d').putImageData(id,0,0);
 }
 
-function drawGridOverlay(canvas,id,P,ox=0,oy=0){
+function drawGridOverlay(canvas,id,P,ox=0,oy=0,panX=null,panY=null){
   if(!id){canvas.width=0;return;}
   const {width,height}=id;
   const maxW=canvas.parentElement?.clientWidth||600;
@@ -1151,11 +1153,12 @@ function drawGridOverlay(canvas,id,P,ox=0,oy=0){
   const dh=Math.min(height*zoom,maxH);
   canvas.width=dw; canvas.height=dh;
 
-  // Centre-crop source region to fill the canvas at the chosen zoom
+  // Centre-crop source region around pan position (defaults to image centre)
   const srcW=dw/zoom;
   const srcH=dh/zoom;
-  const srcX=Math.max(0,Math.floor((width-srcW)/2));
-  const srcY=Math.max(0,Math.floor((height-srcH)/2));
+  const cx=panX??width/2, cy=panY??height/2;
+  const srcX=Math.max(0,Math.min(width-srcW, cx-srcW/2));
+  const srcY=Math.max(0,Math.min(height-srcH,cy-srcH/2));
 
   const ctx=canvas.getContext('2d');
   ctx.imageSmoothingEnabled=false;
@@ -1265,7 +1268,7 @@ async function runStep2(proc){
     $('psInfo').textContent=`Auto-detected — offset ${det.ox}×${det.oy}px`;
   }
   $('psVal').textContent=String(S.pixelSize);
-  drawGridOverlay($('prev2'),src,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy);
+  drawGridOverlay($('prev2'),src,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy,S.gridPan?.x??null,S.gridPan?.y??null);
   $('inDims').textContent=`${src.width}×${src.height}`;
   $('outDims').textContent=`${Math.floor(src.width/S.pixelSize)}×${Math.floor(src.height/S.pixelSize)}`;
   setBadge(2,'badge-done','DONE'); setCardLive(2,true); await tick();
@@ -1438,6 +1441,50 @@ document.querySelectorAll('.step-hdr').forEach(hdr=>{
     if(body?.classList.contains('step-body')) body.classList.toggle('open');
   });
 });
+
+// ── Step 2 grid preview — drag to pan ────────────────────────────────────────
+{
+  const cv=$('prev2');
+  cv.style.cursor='grab';
+  let drag=null;
+
+  function panRedraw(panX,panY){
+    const src=S.selData||S.origData;
+    if(!src) return;
+    S.gridPan={x:panX,y:panY};
+    drawGridOverlay(cv,src,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy,panX,panY);
+  }
+
+  function startDrag(clientX,clientY){
+    if(!S.selData&&!S.origData) return;
+    const src=S.selData||S.origData;
+    drag={
+      startX:clientX, startY:clientY,
+      panX:S.gridPan?.x??src.width/2,
+      panY:S.gridPan?.y??src.height/2,
+    };
+    cv.style.cursor='grabbing';
+  }
+
+  function moveDrag(clientX,clientY){
+    if(!drag) return;
+    const zoom=Math.max(1,Math.floor(10/S.pixelSize));
+    const src=S.selData||S.origData;
+    const nx=Math.max(0,Math.min(src.width, drag.panX-(clientX-drag.startX)/zoom));
+    const ny=Math.max(0,Math.min(src.height,drag.panY-(clientY-drag.startY)/zoom));
+    panRedraw(nx,ny);
+  }
+
+  function endDrag(){ drag=null; cv.style.cursor='grab'; }
+
+  cv.addEventListener('mousedown', e=>{ startDrag(e.clientX,e.clientY); e.preventDefault(); });
+  window.addEventListener('mousemove', e=>{ if(drag) moveDrag(e.clientX,e.clientY); });
+  window.addEventListener('mouseup', endDrag);
+
+  cv.addEventListener('touchstart', e=>{ const t=e.touches[0]; startDrag(t.clientX,t.clientY); e.preventDefault(); },{passive:false});
+  window.addEventListener('touchmove', e=>{ if(drag){const t=e.touches[0]; moveDrag(t.clientX,t.clientY);} },{passive:true});
+  window.addEventListener('touchend', endDrag);
+}
 </script>
 </body>
 </html>
