@@ -1150,7 +1150,6 @@ function drawGridOverlay(canvas,id,P,ox=0,oy=0){
   const dw=Math.min(width*zoom,maxW);
   const dh=Math.min(height*zoom,maxH);
   canvas.width=dw; canvas.height=dh;
-  canvas.style.width=dw+'px'; canvas.style.height=dh+'px';
 
   // Centre-crop source region to fill the canvas at the chosen zoom
   const srcW=dw/zoom;
