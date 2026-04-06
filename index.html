@@ -594,99 +594,91 @@ function applySelection(){
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STEP 2 — PIXEL SIZE DETECTION
-// Block uniformity scoring (F-ratio): for each candidate P and every offset,
-// split the averaged column/row profile into blocks of P. Score = between-block
-// contrast / (within-block variance + 1). At the true P, blocks are internally
-// uniform (low within) and differ from neighbours (high between). Harmonics
-// (2P, 3P) have high within-variance because each block spans multiple logical
-// pixels. Sub-multiples (P/2) have low between-contrast. The F-ratio naturally
-// peaks at the true fundamental P.
-// Averaging over many rows/columns reduces noise to a clean stepped signal.
-// Only full blocks are scored — partial border pixels are excluded.
+// Strong-edge distance histogram — mode = pixel size:
+//   1. Scan rows/cols; mark positions where the pixel-to-pixel colour gradient
+//      exceeds a "strong" threshold (real pixel-art boundaries produce large
+//      jumps; compression noise / gentle shading within a logical pixel does not).
+//   2. Record the distance between every pair of consecutive strong edges.
+//   3. The mode of that distance histogram (most frequent distance in [2,MAX_P])
+//      is the pixel size — because in N×-scaled pixel art the overwhelming
+//      majority of adjacent boundary spacings equal exactly N.
+//   4. Derive the grid phase from (edge-position mod P).
+//
+// Why previous approaches failed:
+//   • F-ratio / autocorrelation on averaged profiles: large flat regions make
+//     big P values score spuriously high.
+//   • Run-length histogram with low threshold: noise gives hist[1]/hist[2]
+//     huge counts, P=2 wins.
 // ─────────────────────────────────────────────────────────────────────────────
 function detectPixelSize(id){
   const {data,width,height}=id;
-  const rowStep=Math.max(1,Math.floor(height/80));
-  const colStep=Math.max(1,Math.floor(width/80));
+  let STRONG=35;           // per-channel mean gradient — pixel-art edge
+  const MAX_P=48;
+  const rowSample=Math.max(1,Math.floor(height/150));
+  const colSample=Math.max(1,Math.floor(width/150));
 
-  // Build averaged column luminance profile (average R+G+B across sampled rows)
-  const colAvg=new Float32Array(width);
-  let rn=0;
-  for(let y=0;y<height;y+=rowStep){
-    let ok=false;
-    for(let x=0;x<width;x++){
-      const a=(y*width+x)*4;
-      if(data[a+3]<128) continue;
-      ok=true;
-      colAvg[x]+=(data[a]+data[a+1]+data[a+2])/3;
-    }
-    if(ok) rn++;
-  }
-  if(rn>0) for(let x=0;x<width;x++) colAvg[x]/=rn;
+  function scan(THRESH){
+    const hist=new Float32Array(MAX_P+1);
+    const hEdge=[], vEdge=[];
 
-  // Build averaged row luminance profile
-  const rowAvg=new Float32Array(height);
-  let cn=0;
-  for(let x=0;x<width;x+=colStep){
-    let ok=false;
-    for(let y=0;y<height;y++){
-      const a=(y*width+x)*4;
-      if(data[a+3]<128) continue;
-      ok=true;
-      rowAvg[y]+=(data[a]+data[a+1]+data[a+2])/3;
-    }
-    if(ok) cn++;
-  }
-  if(cn>0) for(let y=0;y<height;y++) rowAvg[y]/=cn;
-
-  // F-ratio scorer: for given profile, candidate P, offset off
-  // returns {score, bestOff} — only full blocks counted
-  function scoreProfile(profile, P){
-    const N=profile.length;
-    let bestScore=-1, bestOff=0;
-    for(let off=0;off<P;off++){
-      // Collect block means for full blocks only
-      const means=[];
-      for(let start=off;start+P<=N;start+=P){
-        let sum=0;
-        for(let i=0;i<P;i++) sum+=profile[start+i];
-        means.push(sum/P);
+    // Horizontal scan
+    for(let y=0;y<height;y+=rowSample){
+      let last=-1;
+      for(let x=0;x<width-1;x++){
+        const i=(y*width+x)*4, j=i+4;
+        if(data[i+3]<128||data[j+3]<128){last=-1;continue;}
+        const d=(Math.abs(data[i]-data[j])+Math.abs(data[i+1]-data[j+1])+Math.abs(data[i+2]-data[j+2]))/3;
+        if(d>THRESH){
+          const pos=x+1;
+          hEdge.push(pos);
+          if(last>=0){const dist=pos-last;if(dist>=2&&dist<=MAX_P)hist[dist]++;}
+          last=pos;
+        }
       }
-      if(means.length<3) continue;
+    }
 
-      // Between-block variance (contrast between adjacent block means)
-      let between=0;
-      for(let i=1;i<means.length;i++) between+=(means[i]-means[i-1])**2;
-      between/=(means.length-1);
-
-      // Within-block variance (averaged across all blocks)
-      let within=0;
-      for(let i=0,start=off;start+P<=N;start+=P,i++){
-        const m=means[i];
-        for(let j=0;j<P;j++) within+=(profile[start+j]-m)**2;
+    // Vertical scan
+    for(let x=0;x<width;x+=colSample){
+      let last=-1;
+      for(let y=0;y<height-1;y++){
+        const i=(y*width+x)*4, j=i+width*4;
+        if(data[i+3]<128||data[j+3]<128){last=-1;continue;}
+        const d=(Math.abs(data[i]-data[j])+Math.abs(data[i+1]-data[j+1])+Math.abs(data[i+2]-data[j+2]))/3;
+        if(d>THRESH){
+          const pos=y+1;
+          vEdge.push(pos);
+          if(last>=0){const dist=pos-last;if(dist>=2&&dist<=MAX_P)hist[dist]++;}
+          last=pos;
+        }
       }
-      within/=(means.length*P);
-
-      const score=between/(within+1);
-      if(score>bestScore){bestScore=score;bestOff=off;}
     }
-    return {score:bestScore,off:bestOff};
+
+    return {hist,hEdge,vEdge,totalEdges:hEdge.length+vEdge.length};
   }
 
-  // Score all candidate P values, require at least 4 full blocks
-  let bestP=2,bestScore=-1,bestOx=0,bestOy=0;
-  for(let P=2;P<=64;P++){
-    if(Math.floor(width/P)<4||Math.floor(height/P)<4) continue;
-    const h=scoreProfile(colAvg,P);
-    const v=scoreProfile(rowAvg,P);
-    const s=h.score+v.score;
-    if(s>bestScore){
-      bestScore=s; bestP=P;
-      bestOx=h.off; bestOy=v.off;
-    }
+  // Try strong threshold; if too few edges lower it progressively
+  let result=scan(STRONG);
+  if(result.totalEdges<30) result=scan(20);
+  if(result.totalEdges<10) return {P:4,ox:0,oy:0};
+
+  const {hist,hEdge,vEdge}=result;
+
+  // Mode of distance histogram in [2, MAX_P] = pixel size
+  let bestP=4, bestCount=0;
+  for(let P=2;P<=MAX_P;P++){
+    if(hist[P]>bestCount){bestCount=hist[P];bestP=P;}
   }
 
-  return {P:bestP, ox:bestOx, oy:bestOy};
+  // Grid phase: mode of (edge-position mod bestP)
+  function phaseOffset(edges,P){
+    const v=new Float32Array(P);
+    for(const t of edges) v[t%P]++;
+    let best=0;
+    for(let o=1;o<P;o++) if(v[o]>v[best]) best=o;
+    return best;
+  }
+
+  return {P:bestP, ox:phaseOffset(hEdge,bestP), oy:phaseOffset(vEdge,bestP)};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
