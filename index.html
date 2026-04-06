@@ -593,92 +593,93 @@ function applySelection(){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STEP 2 — PIXEL SIZE DETECTION
-// Strong-edge distance histogram — mode = pixel size:
-//   1. Scan rows/cols; mark positions where the pixel-to-pixel colour gradient
-//      exceeds a "strong" threshold (real pixel-art boundaries produce large
-//      jumps; compression noise / gentle shading within a logical pixel does not).
-//   2. Record the distance between every pair of consecutive strong edges.
-//   3. The mode of that distance histogram (most frequent distance in [2,MAX_P])
-//      is the pixel size — because in N×-scaled pixel art the overwhelming
-//      majority of adjacent boundary spacings equal exactly N.
-//   4. Derive the grid phase from (edge-position mod P).
+// STEP 2 — PIXEL SIZE DETECTION  (autocorrelation of edge-density map)
 //
-// Why previous approaches failed:
-//   • F-ratio / autocorrelation on averaged profiles: large flat regions make
-//     big P values score spuriously high.
-//   • Run-length histogram with low threshold: noise gives hist[1]/hist[2]
-//     huge counts, P=2 wins.
+// 1. Build colDens[x] / rowDens[y]: how many sampled scan-lines have a strong
+//    colour jump at that pixel coordinate.  For N×-scaled pixel art this is a
+//    sparse periodic spike train with period N (spikes at every Nth column).
+//
+// 2. Compute the autocorrelation of that spike train.
+//    AC[lag] peaks strongly whenever lag is a multiple of the true period P
+//    and is near-zero (or negative) for non-multiples.
+//    Crucially, AC[P] > AC[2P] > AC[3P] because each longer lag captures
+//    fewer aligned spike pairs → argmax(AC) = P directly.
+//
+// Why earlier approaches failed:
+//    • Luminance-profile AC: slow-varying steps, not spikes → broad AC lobes,
+//      easy to mistake harmonics for the fundamental.
+//    • GCD / mode on run-lengths: within-pixel noise floods short bins → P=2.
+//    • Grid average score: large P has fewer lines → artificially high average.
 // ─────────────────────────────────────────────────────────────────────────────
 function detectPixelSize(id){
   const {data,width,height}=id;
-  let STRONG=35;           // per-channel mean gradient — pixel-art edge
   const MAX_P=48;
   const rowSample=Math.max(1,Math.floor(height/150));
   const colSample=Math.max(1,Math.floor(width/150));
 
-  function scan(THRESH){
-    const hist=new Float32Array(MAX_P+1);
-    const hEdge=[], vEdge=[];
-
-    // Horizontal scan
+  function buildDensity(thresh){
+    const colDens=new Float32Array(width);
+    const rowDens=new Float32Array(height);
     for(let y=0;y<height;y+=rowSample){
-      let last=-1;
       for(let x=0;x<width-1;x++){
-        const i=(y*width+x)*4, j=i+4;
-        if(data[i+3]<128||data[j+3]<128){last=-1;continue;}
+        const i=(y*width+x)*4,j=i+4;
+        if(data[i+3]<128||data[j+3]<128) continue;
         const d=(Math.abs(data[i]-data[j])+Math.abs(data[i+1]-data[j+1])+Math.abs(data[i+2]-data[j+2]))/3;
-        if(d>THRESH){
-          const pos=x+1;
-          hEdge.push(pos);
-          if(last>=0){const dist=pos-last;if(dist>=2&&dist<=MAX_P)hist[dist]++;}
-          last=pos;
-        }
+        if(d>thresh) colDens[x+1]++;
       }
     }
-
-    // Vertical scan
     for(let x=0;x<width;x+=colSample){
-      let last=-1;
       for(let y=0;y<height-1;y++){
-        const i=(y*width+x)*4, j=i+width*4;
-        if(data[i+3]<128||data[j+3]<128){last=-1;continue;}
+        const i=(y*width+x)*4,j=i+width*4;
+        if(data[i+3]<128||data[j+3]<128) continue;
         const d=(Math.abs(data[i]-data[j])+Math.abs(data[i+1]-data[j+1])+Math.abs(data[i+2]-data[j+2]))/3;
-        if(d>THRESH){
-          const pos=y+1;
-          vEdge.push(pos);
-          if(last>=0){const dist=pos-last;if(dist>=2&&dist<=MAX_P)hist[dist]++;}
-          last=pos;
-        }
+        if(d>thresh) rowDens[y+1]++;
       }
     }
-
-    return {hist,hEdge,vEdge,totalEdges:hEdge.length+vEdge.length};
+    return {colDens,rowDens};
   }
 
-  // Try strong threshold; if too few edges lower it progressively
-  let result=scan(STRONG);
-  if(result.totalEdges<30) result=scan(20);
-  if(result.totalEdges<10) return {P:4,ox:0,oy:0};
+  // Autocorrelation of a 1-D density array → returns best period in [2, maxP]
+  // For a sparse periodic spike train, AC[true_period] is the global maximum.
+  function acPeriod(dens, maxP){
+    const N=dens.length;
+    // Mean-centre
+    let mean=0; for(let i=0;i<N;i++) mean+=dens[i]; mean/=N;
+    const s=new Float32Array(N);
+    for(let i=0;i<N;i++) s[i]=dens[i]-mean;
 
-  const {hist,hEdge,vEdge}=result;
-
-  // Mode of distance histogram in [2, MAX_P] = pixel size
-  let bestP=4, bestCount=0;
-  for(let P=2;P<=MAX_P;P++){
-    if(hist[P]>bestCount){bestCount=hist[P];bestP=P;}
+    // AC at lags 2..maxP
+    let bestLag=2, bestAC=-Infinity;
+    for(let lag=2;lag<=maxP;lag++){
+      const len=N-lag; if(len<8) break;
+      let sum=0;
+      for(let i=0;i<len;i++) sum+=s[i]*s[i+lag];
+      const ac=sum/len;
+      if(ac>bestAC){bestAC=ac;bestLag=lag;}
+    }
+    return bestLag;
   }
 
-  // Grid phase: mode of (edge-position mod bestP)
-  function phaseOffset(edges,P){
-    const v=new Float32Array(P);
-    for(const t of edges) v[t%P]++;
-    let best=0;
-    for(let o=1;o<P;o++) if(v[o]>v[best]) best=o;
-    return best;
+  // Find grid phase offset: which offset 0…P-1 maximises mean density at grid lines
+  function bestPhase(dens, length, P){
+    let bestAvg=-1, bestOff=0;
+    for(let off=0;off<P;off++){
+      let sum=0,cnt=0;
+      for(let pos=off;pos<length;pos+=P){sum+=dens[pos];cnt++;}
+      if(cnt>0){const avg=sum/cnt; if(avg>bestAvg){bestAvg=avg;bestOff=off;}}
+    }
+    return bestOff;
   }
 
-  return {P:bestP, ox:phaseOffset(hEdge,bestP), oy:phaseOffset(vEdge,bestP)};
+  // Use low threshold for clean PNG; fallback keeps it working for screenshots
+  const {colDens,rowDens}=buildDensity(8);
+
+  const Px=acPeriod(colDens,MAX_P);
+  const Py=acPeriod(rowDens,MAX_P);
+  // If both axes agree within ±1 use their average, else take the smaller
+  const P=Math.abs(Px-Py)<=1?Math.round((Px+Py)/2):Math.min(Px,Py);
+
+  return {P, ox:bestPhase(colDens,width,P), oy:bestPhase(rowDens,height,P)};
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
