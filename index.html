@@ -118,6 +118,7 @@ input[type=number]:focus{border-color:var(--green)}
 .prev-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
 .canvas-bg{background:repeating-conic-gradient(#191926 0% 25%,#131320 25% 50%) 0 0/14px 14px;display:inline-block;max-width:100%;overflow:hidden}
 canvas.prev{display:block;max-width:100%;max-height:200px;image-rendering:pixelated}
+#prev2{cursor:all-scroll}
 
 /* Sprite grid */
 .sprite-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:8px;margin-top:12px;max-height:220px;overflow-y:auto;padding-right:4px}
@@ -1445,7 +1446,6 @@ document.querySelectorAll('.step-hdr').forEach(hdr=>{
 // ── Step 2 grid preview — drag to pan ────────────────────────────────────────
 {
   const cv=$('prev2');
-  cv.style.cursor='grab';
   let drag=null;
 
   function panRedraw(panX,panY){
@@ -1463,7 +1463,8 @@ document.querySelectorAll('.step-hdr').forEach(hdr=>{
       panX:S.gridPan?.x??src.width/2,
       panY:S.gridPan?.y??src.height/2,
     };
-    cv.style.cursor='grabbing';
+    cv.classList.add('dragging');
+    document.body.style.cursor='all-scroll';
   }
 
   function moveDrag(clientX,clientY){
@@ -1475,7 +1476,7 @@ document.querySelectorAll('.step-hdr').forEach(hdr=>{
     panRedraw(nx,ny);
   }
 
-  function endDrag(){ drag=null; cv.style.cursor='grab'; }
+  function endDrag(){ drag=null; cv.classList.remove('dragging'); document.body.style.cursor=''; }
 
   cv.addEventListener('mousedown', e=>{ startDrag(e.clientX,e.clientY); e.preventDefault(); });
   window.addEventListener('mousemove', e=>{ if(drag) moveDrag(e.clientX,e.clientY); });
