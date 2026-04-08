@@ -340,6 +340,29 @@ select.sel-styled option{background:var(--surface2)}
         <div style="border-top:1px solid var(--border);margin:12px 0 10px"></div>
         <div class="srow">
           <label class="chk-label">
+            <input type="checkbox" id="useCustomPalette">
+            <span class="chk-box"></span>
+            <strong>Custom Palette</strong>
+          </label>
+        </div>
+        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Upload a palette file to remap all colors to an exact set. Overrides palette consolidation. Supports PNG (unique colors sampled) and GPL (GIMP palette).</p>
+        <div id="customPaletteOptions">
+          <div class="srow">
+            <span class="slabel">Palette File</span>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <span id="palFileName" style="font-size:10px;color:var(--muted);font-style:italic">No file chosen</span>
+              <span style="font-family:'Press Start 2P',monospace;font-size:8px;padding:5px 10px;border:1px solid var(--border-hi);color:var(--text);background:var(--surface2);cursor:pointer;white-space:nowrap">BROWSE</span>
+              <input type="file" id="palFileInput" accept=".png,.gpl,image/png" style="display:none">
+            </label>
+          </div>
+          <div id="palPreview" style="display:none;margin-bottom:10px">
+            <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Loaded Palette <span id="palColorCount" style="color:var(--blue)"></span></div>
+            <div class="palette" id="palSwatches"></div>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--border);margin:12px 0 10px"></div>
+        <div class="srow">
+          <label class="chk-label">
             <input type="checkbox" id="consolidate" checked>
             <span class="chk-box"></span>
             <strong>Palette Consolidation</strong>
@@ -439,6 +462,7 @@ const S = {
   pixelOffset: {ox:0,oy:0},
   gridPan: null,   // {x,y} center in source coords; null = use image center
   gridZoom: null,  // explicit user zoom; null = auto from P
+  customPalette: null, // [{r,g,b}] loaded from palette file
   denoised: null,
   final: null,
 };
@@ -1244,6 +1268,81 @@ function moveStep(id,dir){
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PALETTE FILE PARSING
+// ─────────────────────────────────────────────────────────────────────────────
+function parseGPL(text){
+  const colors=[];
+  for(const line of text.split('\n')){
+    const m=line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)/);
+    if(m) colors.push({r:parseInt(m[1]),g:parseInt(m[2]),b:parseInt(m[3])});
+  }
+  return colors;
+}
+
+function samplePNGPalette(imageData){
+  const {data,width,height}=imageData;
+  const seen=new Set();
+  const colors=[];
+  for(let i=0;i<width*height;i++){
+    const di=i*4;
+    if(data[di+3]<128) continue;
+    const r=data[di],g=data[di+1],b=data[di+2];
+    const k=(r<<16)|(g<<8)|b;
+    if(!seen.has(k)){seen.add(k);colors.push({r,g,b});}
+  }
+  return colors;
+}
+
+function loadPaletteFile(file){
+  if(!file) return;
+  if(file.name.endsWith('.gpl')||file.type==='text/plain'){
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const colors=parseGPL(e.target.result);
+      applyCustomPalette(colors, file.name);
+    };
+    reader.readAsText(file);
+  } else {
+    // Treat as image — sample unique colors
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        const c=document.createElement('canvas');
+        c.width=img.width; c.height=img.height;
+        c.getContext('2d').drawImage(img,0,0);
+        const colors=samplePNGPalette(c.getContext('2d').getImageData(0,0,img.width,img.height));
+        applyCustomPalette(colors, file.name);
+      };
+      img.src=e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+function applyCustomPalette(colors, filename){
+  if(!colors.length) return;
+  S.customPalette=colors;
+  $('palFileName').textContent=`${filename} — ${colors.length} colors`;
+  $('palFileName').style.color='var(--text)';
+  $('palFileName').style.fontStyle='normal';
+  // Show swatch preview (cap at 72)
+  const sw=$('palSwatches'); sw.innerHTML='';
+  const limit=Math.min(colors.length,72);
+  for(let i=0;i<limit;i++){
+    const {r,g,b}=colors[i];
+    const d=document.createElement('div');
+    d.className='swatch';
+    d.style.background=`rgb(${r},${g},${b})`;
+    d.title=`rgb(${r},${g},${b})`;
+    sw.appendChild(d);
+  }
+  $('palColorCount').textContent=`(${colors.length} colors)`;
+  $('palPreview').style.display='block';
+  if($('useCustomPalette').checked&&S.origData) runPipeline();
+}
+
 let debounce=null;
 
 async function runStep1(proc){
@@ -1294,16 +1393,26 @@ async function runStep3(proc){
     const doConsolidate=$('consolidate').checked,maxC=Math.max(2,parseInt($('maxColors').value)||32);
     const algo=$('quantAlgo').value,useOKLab=$('quantOKLab').checked;
     const doPerceptual=$('togP').checked,perceptualMode=$('perceptualMode').value;
+    const useCustomPal=$('useCustomPalette').checked&&S.customPalette&&S.customPalette.length>0;
     const cBefore=countColors(proc);
     $('cBefore').textContent=cBefore; $('noiseStats').style.display='flex';
     await tick();
     let noised=removeNoise(proc,t,nbr,ap);
     const cAfter=countColors(noised); $('cAfter').textContent=cAfter;
     await tick();
-    out=doConsolidate&&cAfter>maxC?quantize(noised,maxC,algo,useOKLab,'off'):noised;
-    if(doPerceptual){
-      const colorMap=getColorMap(out),palette=[...colorMap.values()];
-      out=remapPixels(out,perceptualMode==='oklab'?buildOKLabLookup(colorMap,palette):buildLABLookup(colorMap,palette));
+    if(useCustomPal){
+      // Remap directly to the custom palette — skip quantization entirely
+      const colorMap=getColorMap(noised);
+      const lookup=perceptualMode==='oklab'||doPerceptual
+        ?buildOKLabLookup(colorMap,S.customPalette)
+        :buildLABLookup(colorMap,S.customPalette);
+      out=remapPixels(noised,lookup);
+    } else {
+      out=doConsolidate&&cAfter>maxC?quantize(noised,maxC,algo,useOKLab,'off'):noised;
+      if(doPerceptual){
+        const colorMap=getColorMap(out),palette=[...colorMap.values()];
+        out=remapPixels(out,perceptualMode==='oklab'?buildOKLabLookup(colorMap,palette):buildLABLookup(colorMap,palette));
+      }
     }
     S.denoised=out;
     const cFinal=countColors(out);
@@ -1417,6 +1526,21 @@ $('psInput').addEventListener('change',()=>{
 
 // Step 3 toggle & options
 $('tog3').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+
+// Custom palette
+$('palFileInput').addEventListener('change',e=>loadPaletteFile(e.target.files[0]));
+$('useCustomPalette').addEventListener('change',function(){
+  const on=this.checked;
+  const consolidateSection=$('consolidate').closest('.srow');
+  ['consolidateOptions','quantOKLabRow','maxColorsRow'].forEach(id=>{
+    $(id).style.opacity=on?'.35':'';
+    $(id).style.pointerEvents=on?'none':'';
+  });
+  consolidateSection.style.opacity=on?'.35':'';
+  consolidateSection.style.pointerEvents=on?'none':'';
+  $('customPaletteOptions').style.opacity=on?'1':'.35';
+  if(S.origData) runPipeline();
+});
 $('noiseT').addEventListener('input',function(){
   $('noiseTVal').textContent=this.value;
   clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },700);
