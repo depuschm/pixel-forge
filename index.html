@@ -345,14 +345,14 @@ select.sel-styled option{background:var(--surface2)}
             <strong>Custom Palette</strong>
           </label>
         </div>
-        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Upload a palette file to remap all colors to an exact set. Overrides palette consolidation. Supports PNG (unique colors sampled) and GPL (GIMP palette).</p>
+        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Upload a palette file to remap all colors to an exact set. Overrides palette consolidation. Supports PNG (unique colors sampled), GPL (GIMP palette) and ACT (Adobe Color Table).</p>
         <div id="customPaletteOptions">
           <div class="srow">
             <span class="slabel">Palette File</span>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
               <span id="palFileName" style="font-size:10px;color:var(--muted);font-style:italic">No file chosen</span>
               <span style="font-family:'Press Start 2P',monospace;font-size:8px;padding:5px 10px;border:1px solid var(--border-hi);color:var(--text);background:var(--surface2);cursor:pointer;white-space:nowrap">BROWSE</span>
-              <input type="file" id="palFileInput" accept=".png,.gpl,image/png" style="display:none">
+              <input type="file" id="palFileInput" accept=".png,.gpl,.act,image/png" style="display:none">
             </label>
           </div>
           <div id="palPreview" style="display:none;margin-bottom:10px">
@@ -1280,6 +1280,17 @@ function parseGPL(text){
   return colors;
 }
 
+function parseACT(buffer){
+  // ACT: 768 bytes = 256 × RGB, optional 4-byte footer with count + transparent index
+  const bytes=new Uint8Array(buffer);
+  const count=bytes.length>=772?((bytes[768]<<8)|bytes[769])||256:256;
+  const colors=[];
+  for(let i=0;i<Math.min(count,256);i++){
+    colors.push({r:bytes[i*3],g:bytes[i*3+1],b:bytes[i*3+2]});
+  }
+  return colors;
+}
+
 function samplePNGPalette(imageData){
   const {data,width,height}=imageData;
   const seen=new Set();
@@ -1296,7 +1307,11 @@ function samplePNGPalette(imageData){
 
 function loadPaletteFile(file){
   if(!file) return;
-  if(file.name.endsWith('.gpl')||file.type==='text/plain'){
+  if(file.name.endsWith('.act')){
+    const reader=new FileReader();
+    reader.onload=e=>applyCustomPalette(parseACT(e.target.result), file.name);
+    reader.readAsArrayBuffer(file);
+  } else if(file.name.endsWith('.gpl')||file.type==='text/plain'){
     const reader=new FileReader();
     reader.onload=e=>{
       const colors=parseGPL(e.target.result);
