@@ -280,7 +280,14 @@ select.sel-styled option{background:var(--surface2)}
         <p style="font-size:9px;color:var(--amber);margin-top:4px;line-height:1.7">Detection is heuristic and may be off — especially on blurred or non-pixel-perfect images. Use Manual Override if the grid overlay looks misaligned.</p>
         <div class="preview-wrap">
           <div class="prev-label">Preview — Pixel Grid Overlay</div>
-          <div class="canvas-bg"><canvas class="prev" id="prev2"></canvas></div>
+          <div class="canvas-bg" style="position:relative">
+            <canvas class="prev" id="prev2"></canvas>
+            <div id="gridZoomBtns" style="position:absolute;bottom:5px;right:5px;display:flex;gap:3px;z-index:1">
+              <button id="gridZoomOut" style="font-family:'Press Start 2P',monospace;font-size:11px;width:22px;height:22px;background:rgba(8,8,15,.75);border:1px solid var(--border-hi);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1"><span style="position:relative;top:2px">-</span></button>
+              <button id="gridZoomIn"  style="font-family:'Press Start 2P',monospace;font-size:11px;width:22px;height:22px;background:rgba(8,8,15,.75);border:1px solid var(--border-hi);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1"><span style="position:relative;top:2px">+</span></button>
+            </div>
+          </div>
+          <div style="font-size:9px;color:var(--muted);margin-top:5px">drag to pan · +/− to zoom</div>
         </div>
       </div>
     </div>
@@ -431,6 +438,7 @@ const S = {
   pixelSize: 8,
   pixelOffset: {ox:0,oy:0},
   gridPan: null,   // {x,y} center in source coords; null = use image center
+  gridZoom: null,  // explicit user zoom; null = auto from P
   denoised: null,
   final: null,
 };
@@ -588,7 +596,7 @@ function makeSpriteItem(spId,label,id,x,y,w,h,selected){
 }
 
 function applySelection(){
-  S.gridPan=null;
+  S.gridPan=null; S.gridZoom=null;
   if(S.selSprite==='full'||!$('tog1').checked){
     S.selData=S.origData;
   } else {
@@ -1140,14 +1148,15 @@ function drawPrev(canvas,id){
   canvas.getContext('2d').putImageData(id,0,0);
 }
 
-function drawGridOverlay(canvas,id,P,ox=0,oy=0,panX=null,panY=null){
+function drawGridOverlay(canvas,id,P,ox=0,oy=0,panX=null,panY=null,userZoom=null){
   if(!id){canvas.width=0;return;}
   const {width,height}=id;
   const maxW=canvas.parentElement?.clientWidth||600;
   const maxH=200;
 
-  // Zoom so each game pixel is ~10 screen pixels; minimum 1:1
-  const zoom=Math.max(1,Math.floor(10/P));
+  // Zoom: user-set or auto (~10 screen px per game pixel); minimum fit-to-preview
+  const fitZ=Math.min(1,maxW/width,maxH/height);
+  const zoom=userZoom??Math.max(fitZ,Math.floor(10/P));
 
   // Canvas is the zoomed image or the container limit, whichever is smaller
   const dw=Math.min(width*zoom,maxW);
@@ -1269,7 +1278,7 @@ async function runStep2(proc){
     $('psInfo').textContent=`Auto-detected — offset ${det.ox}×${det.oy}px`;
   }
   $('psVal').textContent=String(S.pixelSize);
-  drawGridOverlay($('prev2'),src,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy,S.gridPan?.x??null,S.gridPan?.y??null);
+  drawGridOverlay($('prev2'),src,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy,S.gridPan?.x??null,S.gridPan?.y??null,S.gridZoom);
   $('inDims').textContent=`${src.width}×${src.height}`;
   $('outDims').textContent=`${Math.floor(src.width/S.pixelSize)}×${Math.floor(src.height/S.pixelSize)}`;
   setBadge(2,'badge-done','DONE'); setCardLive(2,true); await tick();
@@ -1452,8 +1461,35 @@ document.querySelectorAll('.step-hdr').forEach(hdr=>{
     const src=S.selData||S.origData;
     if(!src) return;
     S.gridPan={x:panX,y:panY};
-    drawGridOverlay(cv,src,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy,panX,panY);
+    drawGridOverlay(cv,src,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy,panX,panY,S.gridZoom);
   }
+
+  function zoomRedraw(){
+    const src=S.selData||S.origData;
+    if(!src) return;
+    drawGridOverlay(cv,src,S.pixelSize,S.pixelOffset.ox,S.pixelOffset.oy,S.gridPan?.x??null,S.gridPan?.y??null,S.gridZoom);
+  }
+
+  $('gridZoomIn').addEventListener('click',()=>{
+    const src=S.selData||S.origData; if(!src) return;
+    const auto=Math.max(1,Math.floor(10/S.pixelSize));
+    const cur=S.gridZoom??auto;
+    // Max zoom: at least 4 game pixels visible in the narrower axis
+    const maxW=cv.parentElement?.clientWidth||600;
+    const maxZ=Math.floor(Math.min(maxW,200)/(S.pixelSize*4));
+    S.gridZoom=Math.min(cur*2,Math.max(auto,maxZ));
+    zoomRedraw();
+  });
+  $('gridZoomOut').addEventListener('click',()=>{
+    const src=S.selData||S.origData; if(!src) return;
+    const auto=Math.max(1,Math.floor(10/S.pixelSize));
+    const cur=S.gridZoom??auto;
+    // Min zoom: fit the full image inside the preview
+    const maxW=cv.parentElement?.clientWidth||600;
+    const minZ=Math.max(0.25,Math.min(1,maxW/src.width,200/src.height));
+    S.gridZoom=Math.max(cur/2,minZ);
+    zoomRedraw();
+  });
 
   function startDrag(clientX,clientY){
     if(!S.selData&&!S.origData) return;
