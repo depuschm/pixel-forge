@@ -487,12 +487,14 @@ function setMode(m){
   document.body.classList.toggle('mode-simple', m==='simple');
   $('modeSimple').classList.toggle('active', m==='simple');
   $('modeAdv').classList.toggle('active', m==='advanced');
+  localStorage.setItem('pixelforge-mode', m);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UTILS
 // ─────────────────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
+setMode(localStorage.getItem('pixelforge-mode')||'simple');
 
 function colorDist(r1,g1,b1,r2,g2,b2){
   return Math.sqrt((r1-r2)**2+(g1-g2)**2+(b1-b2)**2);
@@ -1721,7 +1723,7 @@ const dz=$('dropZone');
 dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
 dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
 dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag-over');loadFile(e.dataTransfer.files[0]);});
-dz.addEventListener('click',()=>$('fileInput').click());
+dz.addEventListener('click',e=>{ if(e.target.closest('#dropZone')) $('fileInput').click(); });
 $('fileInput').addEventListener('change',e=>loadFile(e.target.files[0]));
 
 $('runBtn').addEventListener('click',runPipeline);
@@ -1747,7 +1749,9 @@ $('tog3').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 
 // Custom palette
 $('remapMethod').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
-
+// Prevent palette browse clicks from bubbling to the drop zone click handler
+$('palFileInput').closest('label')?.addEventListener('click',e=>e.stopPropagation());
+$('palFileInput').addEventListener('change',e=>loadPaletteFile(e.target.files[0]));
 $('useCustomPalette').addEventListener('change',function(){
   const on=this.checked;
   const consolidateSection=$('consolidate').closest('.srow');
