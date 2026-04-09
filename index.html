@@ -358,6 +358,7 @@ select.sel-styled option{background:var(--surface2)}
           <div id="palPreview" style="display:none;margin-bottom:10px">
             <div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Loaded Palette <span id="palColorCount" style="color:var(--blue)"></span></div>
             <div class="palette" id="palSwatches"></div>
+            <div id="palMsg" style="display:none;font-size:9px;color:var(--amber);margin-top:6px"></div>
           </div>
         </div>
         <div style="border-top:1px solid var(--border);margin:12px 0 10px"></div>
@@ -1436,6 +1437,13 @@ function applyCustomPalette(colors, filename){
   }
   $('palColorCount').textContent=`(${colors.length} colors)`;
   $('palPreview').style.display='block';
+  const msg=$('palMsg');
+  if(colors.length>72){
+    msg.textContent=`Showing 72 of ${colors.length} colors — full palette will still be used for remapping`;
+    msg.style.display='block';
+  } else {
+    msg.style.display='none';
+  }
   if($('useCustomPalette').checked&&S.origData) runPipeline();
 }
 
