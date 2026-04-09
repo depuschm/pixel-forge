@@ -345,14 +345,14 @@ select.sel-styled option{background:var(--surface2)}
             <strong>Custom Palette</strong>
           </label>
         </div>
-        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Upload a palette file to remap all colors to an exact set. Overrides palette consolidation. Supports PNG (unique colors sampled), GPL (GIMP palette) and ACT (Adobe Color Table).</p>
+        <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Upload a palette file to remap all colors to an exact set. Overrides palette consolidation. Supports PNG (unique colors sampled), GPL (GIMP palette), ACT (Adobe Color Table) and ASE (Adobe Swatch Exchange).</p>
         <div id="customPaletteOptions">
           <div class="srow">
             <span class="slabel">Palette File</span>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
               <span id="palFileName" style="font-size:10px;color:var(--muted);font-style:italic">No file chosen</span>
               <span style="font-family:'Press Start 2P',monospace;font-size:8px;padding:5px 10px;border:1px solid var(--border-hi);color:var(--text);background:var(--surface2);cursor:pointer;white-space:nowrap">BROWSE</span>
-              <input type="file" id="palFileInput" accept=".png,.gpl,.act,image/png" style="display:none">
+              <input type="file" id="palFileInput" accept=".png,.gpl,.act,.ase,image/png" style="display:none">
             </label>
           </div>
           <div id="palPreview" style="display:none;margin-bottom:10px">
@@ -1291,6 +1291,55 @@ function parseACT(buffer){
   return colors;
 }
 
+function parseASE(buffer){
+  // ASE binary: magic ASEF, version, block count, then blocks
+  // Block type 0x0001 = color entry; color models: RGB, CMYK, LAB, Gray
+  const v=new DataView(buffer);
+  const magic=String.fromCharCode(v.getUint8(0),v.getUint8(1),v.getUint8(2),v.getUint8(3));
+  if(magic!=='ASEF') return [];
+  const blockCount=v.getInt32(8,false);
+  const colors=[];
+  let pos=12;
+  for(let b=0;b<blockCount;b++){
+    if(pos+6>buffer.byteLength) break;
+    const blockType=v.getUint16(pos,false);
+    const blockLen=v.getInt32(pos+2,false);
+    pos+=6;
+    if(blockType===0x0001&&blockLen>0){
+      // Color entry: name (UTF-16BE, 2-byte length prefix), then model (4 chars), then values
+      const nameLen=v.getUint16(pos,false);
+      pos+=2+nameLen*2; // skip name
+      if(pos+4>buffer.byteLength) break;
+      const model=String.fromCharCode(v.getUint8(pos),v.getUint8(pos+1),v.getUint8(pos+2),v.getUint8(pos+3));
+      pos+=4;
+      if(model==='RGB '){
+        const r=Math.round(v.getFloat32(pos,false)*255);
+        const g=Math.round(v.getFloat32(pos+4,false)*255);
+        const b=Math.round(v.getFloat32(pos+8,false)*255);
+        colors.push({r,g,b}); pos+=12;
+      } else if(model==='CMYK'){
+        // Convert CMYK floats → RGB
+        const c=v.getFloat32(pos,false),m=v.getFloat32(pos+4,false);
+        const y=v.getFloat32(pos+8,false),k=v.getFloat32(pos+12,false);
+        colors.push({
+          r:Math.round(255*(1-c)*(1-k)),
+          g:Math.round(255*(1-m)*(1-k)),
+          b:Math.round(255*(1-y)*(1-k)),
+        }); pos+=16;
+      } else if(model==='LAB '){
+        pos+=12; // skip — LAB→RGB conversion non-trivial, skip unsupported
+      } else if(model==='Gray'){
+        const v2=Math.round(v.getFloat32(pos,false)*255);
+        colors.push({r:v2,g:v2,b:v2}); pos+=4;
+      }
+      pos+=2; // color type (global/spot/normal)
+    } else {
+      pos+=blockLen;
+    }
+  }
+  return colors;
+}
+
 function samplePNGPalette(imageData){
   const {data,width,height}=imageData;
   const seen=new Set();
@@ -1307,9 +1356,12 @@ function samplePNGPalette(imageData){
 
 function loadPaletteFile(file){
   if(!file) return;
-  if(file.name.endsWith('.act')){
+  if(file.name.endsWith('.act')||file.name.endsWith('.ase')){
     const reader=new FileReader();
-    reader.onload=e=>applyCustomPalette(parseACT(e.target.result), file.name);
+    reader.onload=e=>{
+      const colors=file.name.endsWith('.ase')?parseASE(e.target.result):parseACT(e.target.result);
+      applyCustomPalette(colors, file.name);
+    };
     reader.readAsArrayBuffer(file);
   } else if(file.name.endsWith('.gpl')||file.type==='text/plain'){
     const reader=new FileReader();
