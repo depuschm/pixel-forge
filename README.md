@@ -4,6 +4,8 @@
 
 Single-file, zero-dependency, runs entirely in the browser.
 
+🔗 **[Live Demo](https://depuschm.github.io/pixel-forge/)**
+
 ![PIXELFORGE screenshot](screenshot.png)
 
 ---
