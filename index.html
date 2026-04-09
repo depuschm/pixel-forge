@@ -374,6 +374,11 @@ select.sel-styled option{background:var(--surface2)}
             <option value="bayer8">Bayer 8×8 — ordered dithering, strong CRT pattern</option>
           </select>
         </div>
+        <div class="srow" id="ditherStrengthRow" style="display:none">
+          <span class="slabel">Strength</span>
+          <input type="range" id="ditherStrength" min="0" max="100" value="100">
+          <span class="val-disp" id="ditherStrengthVal">100</span>
+        </div>
         <p style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">Applies to both custom palette and palette consolidation remapping.</p>
         <div class="srow">
           <label class="chk-label">
@@ -1060,16 +1065,39 @@ function ditherBayer(id, palette, method, size){
 }
 
 function applyRemapMethod(id, palette, method){
-  if(method==='floyd') return ditherFloydSteinberg(id,palette,'oklab');
-  if(method==='bayer2') return ditherBayer(id,palette,'oklab',2);
-  if(method==='bayer4') return ditherBayer(id,palette,'oklab',4);
-  if(method==='bayer8') return ditherBayer(id,palette,'oklab',8);
+  const isDither=method==='floyd'||method.startsWith('bayer');
+  const strength=isDither?parseInt($('ditherStrength').value)/100:1;
+
+  if(method==='floyd'){
+    const dithered=ditherFloydSteinberg(id,palette,'oklab');
+    if(strength>=1) return dithered;
+    return blendImageData(applyRemapMethod(id,palette,'oklab'),dithered,strength);
+  }
+  if(method.startsWith('bayer')){
+    const size=parseInt(method.replace('bayer',''));
+    const dithered=ditherBayer(id,palette,'oklab',size);
+    if(strength>=1) return dithered;
+    return blendImageData(applyRemapMethod(id,palette,'oklab'),dithered,strength);
+  }
   // Nearest-color methods — build lookup then remap
   const colorMap=getColorMap(id);
   const lookup=method==='rgb'?buildRGBLookup(colorMap,palette)
               :method==='lab'?buildLABLookup(colorMap,palette)
               :buildOKLabLookup(colorMap,palette);
   return remapPixels(id,lookup);
+}
+
+function blendImageData(a, b, t){
+  // Blend two ImageData pixel-by-pixel: result = a*(1-t) + b*t
+  const result=new Uint8ClampedArray(a.data);
+  for(let i=0;i<a.width*a.height;i++){
+    const di=i*4;
+    if(a.data[di+3]<10) continue;
+    result[di  ]=Math.round(a.data[di  ]*(1-t)+b.data[di  ]*t);
+    result[di+1]=Math.round(a.data[di+1]*(1-t)+b.data[di+1]*t);
+    result[di+2]=Math.round(a.data[di+2]*(1-t)+b.data[di+2]*t);
+  }
+  return new ImageData(result,a.width,a.height);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1748,7 +1776,15 @@ $('psInput').addEventListener('change',()=>{
 $('tog3').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
 
 // Custom palette
-$('remapMethod').addEventListener('change',()=>{ if(S.origData) runPipeline(); });
+$('remapMethod').addEventListener('change',()=>{
+  const isDither=['floyd','bayer2','bayer4','bayer8'].includes($('remapMethod').value);
+  $('ditherStrengthRow').style.display=isDither?'flex':'none';
+  if(S.origData) runPipeline();
+});
+$('ditherStrength').addEventListener('input',function(){
+  $('ditherStrengthVal').textContent=this.value;
+  clearTimeout(debounce); debounce=setTimeout(()=>{ if(S.origData) runPipeline(); },400);
+});
 // Prevent palette browse clicks from bubbling to the drop zone click handler
 $('palFileInput').closest('label')?.addEventListener('click',e=>e.stopPropagation());
 $('palFileInput').addEventListener('change',e=>loadPaletteFile(e.target.files[0]));
