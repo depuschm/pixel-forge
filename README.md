@@ -6,7 +6,8 @@ Single-file, zero-dependency, runs entirely in the browser.
 
 🔗 **[Live Demo](https://depuschm.github.io/pixel-forge/)**
 
-![PIXELFORGE screenshot](screenshot.png)
+![Sprite Detection](docs/screenshot-sprite-detection.png)
+![Color Reduction](docs/screenshot-color-reduction.png)
 
 ---
 
@@ -22,7 +23,7 @@ Automatically detects sprites separated by fully transparent pixels. Click any d
 **Step 2 — Pixel Size Detection**
 Detects the upscale factor of the source image using an F-ratio block uniformity algorithm across averaged row/column luminance profiles. Supports pixel sizes from 1 (native resolution) upward. Includes a zoomable, pannable grid overlay preview so you can verify alignment. Manual override available.
 
-**Step 3 — Noise Removal & Palette** *(optional)*
+**Step 3 — Color Reduction & Palette** *(optional)*
 - **Noise removal** — merges similar-colored pixels by color distance threshold
 - **Palette consolidation** — quantizes to a target color count using k-means, Wu's, Median Cut or Octree, optionally in OKLab space
 - **Custom palette** — upload your own palette and remap all colors to it exactly
@@ -56,7 +57,7 @@ Custom palettes can be loaded from:
 
 ### Other Features
 
-- **Simple / Advanced mode** — advanced mode exposes extra controls (quantization algorithm, OKLab quantization, perceptual matching, neighbored noise removal, step reordering). Mode is persisted in `localStorage`.
+- **Simple / Advanced mode** — advanced mode exposes extra controls (quantization algorithm, OKLab quantization, perceptual matching, neighbored color reduction, step reordering). Mode is persisted in `localStorage`.
 - **Step reordering** — drag steps into any order in advanced mode
 - **Drag-to-pan + zoom** on the pixel size preview for fine-grained grid inspection
 - **Download** the final result as PNG

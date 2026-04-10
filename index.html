@@ -301,11 +301,11 @@ select.sel-styled option{background:var(--surface2)}
         </div>
         <div class="step-num">3</div>
         <div class="step-meta">
-          <div class="step-name">Noise Removal <span style="font-size:9px;color:var(--muted)">(optional)</span></div>
-          <div class="step-desc">Merge similar-colored pixels to reduce color count</div>
+          <div class="step-name">Color Reduction <span style="font-size:9px;color:var(--muted)">(optional)</span></div>
+          <div class="step-desc">Merge, quantize and remap colors to a target palette</div>
         </div>
         <span id="badge3" class="step-badge badge-wait">WAIT</span>
-        <label class="toggle" title="Enable noise removal" onclick="event.stopPropagation()">
+        <label class="toggle" title="Enable color reduction" onclick="event.stopPropagation()">
           <input type="checkbox" id="tog3" checked>
           <span class="tog-sl"></span>
         </label>
@@ -313,7 +313,7 @@ select.sel-styled option{background:var(--surface2)}
       <div class="step-body open" id="body3">
         <div class="stats" id="noiseStats" style="display:none">
           <div class="stat"><div class="stat-v" id="cBefore">—</div><div class="stat-l">Colors Before</div></div>
-          <div class="stat"><div class="stat-v" id="cAfter">—</div><div class="stat-l">After Noise</div></div>
+          <div class="stat"><div class="stat-v" id="cAfter">—</div><div class="stat-l">After Merge</div></div>
           <div class="stat"><div class="stat-v" id="cFinal">—</div><div class="stat-l">Final Colors</div></div>
           <div class="stat"><div class="stat-v" id="cReduce">—</div><div class="stat-l">Reduction</div></div>
         </div>
@@ -387,7 +387,7 @@ select.sel-styled option{background:var(--surface2)}
             <strong>Palette Consolidation</strong>
           </label>
         </div>
-        <p class="adv" style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">After noise removal, quantize down to a target palette size. All algorithms operate on the post-noise color set (typically &lt;100 colors), so speed differences are negligible — choose by quality preference.</p>
+        <p class="adv" style="font-size:9px;color:var(--muted);margin:-4px 0 10px 0;line-height:1.7">After color merging, quantize down to a target palette size. All algorithms operate on the post-merge color set (typically &lt;100 colors), so speed differences are negligible — choose by quality preference.</p>
         <div class="srow adv" id="consolidateOptions">
           <span class="slabel">Algorithm</span>
           <select id="quantAlgo" class="sel-styled">
@@ -426,7 +426,7 @@ select.sel-styled option{background:var(--surface2)}
           </select>
         </div>
         <div class="preview-wrap">
-          <div class="prev-label">Preview — After Noise Removal</div>
+          <div class="prev-label">Preview — After Color Reduction</div>
           <div class="canvas-bg"><canvas class="prev" id="prev3"></canvas></div>
         </div>
         <div id="paletteWrap" style="display:none;margin-top:10px">
