@@ -598,10 +598,10 @@ function renderSpriteGrid(sprites){
   grid.className='sprite-grid';
 
   // Full image option (always first)
-  grid.appendChild(makeSpriteItem('full','Full Image',S.origData,0,0,S.origData.width,S.origData.height,true));
+  grid.appendChild(makeSpriteItem('full','Full Image',S.origData,0,0,S.origData.width,S.origData.height,S.selSprite==='full'));
 
   for(const sp of sprites){
-    grid.appendChild(makeSpriteItem(sp.id,`${sp.w}×${sp.h}`,S.origData,sp.x,sp.y,sp.w,sp.h,false));
+    grid.appendChild(makeSpriteItem(sp.id,`${sp.w}×${sp.h}`,S.origData,sp.x,sp.y,sp.w,sp.h,S.selSprite===sp.id));
   }
   con.appendChild(grid);
 
