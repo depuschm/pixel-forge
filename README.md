@@ -6,8 +6,7 @@ Single-file, zero-dependency, runs entirely in the browser.
 
 🔗 **[Live Demo](https://depuschm.github.io/pixel-forge/)**
 
-![Sprite Detection](docs/screenshot-sprite-detection.png)
-![Color Reduction](docs/screenshot-color-reduction.png)
+![PIXELFORGE](docs/screenshot-full.png)
 
 ---
 
